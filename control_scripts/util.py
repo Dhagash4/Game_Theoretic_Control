@@ -5,6 +5,7 @@
 # Utility functions
 
 import numpy as np
+from math import pi
 
 def wrapToPi(theta: float):
     """
@@ -14,10 +15,10 @@ def wrapToPi(theta: float):
     Returns:
         - theta (float): angle within range [-pi, pi]
     """
-    while theta < -math.pi:
-        theta = theta + 2 * math.pi
-    while theta > math.pi:
-        theta = theta - 2 * math.pi
+    while theta < -pi:
+        theta = theta + 2 * pi
+    while theta > pi:
+        theta = theta - 2 * pi
     return theta
 
 def wrapTo2Pi(theta: float):
@@ -29,9 +30,9 @@ def wrapTo2Pi(theta: float):
         - theta (float): angle within range [0, 2pi]
     """
     while theta < 0:
-        theta = theta + 2 * math.pi
-    while theta > 2 * math.pi:
-        theta = theta - 2 * math.pi
+        theta = theta + 2 * pi
+    while theta > 2 * pi:
+        theta = theta - 2 * pi
     return theta
 
 def euclidean_distance(pt_A: [float, float], pt_B: [float, float]):
@@ -43,5 +44,5 @@ def euclidean_distance(pt_A: [float, float], pt_B: [float, float]):
     Returns:
         - dist (float): distance between points A and B
     """
-    dist = np.linalg.norm(pt_A - pt_B, ord = 'fro')
+    dist = np.linalg.norm(pt_A - pt_B)
     return dist
