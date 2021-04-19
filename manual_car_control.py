@@ -24,8 +24,7 @@ class CarEnv():
 
 
     def __init__(self):
-        pygame.init()
-        pygame.display.set_mode((100, 100))
+        
         self.pressed_up = False
         self.pressed_down = False
         self.pressed_left = False
@@ -38,7 +37,7 @@ class CarEnv():
         self.al=100
         self.thres_v = 0.05
         self.thres_w = 0.05
-        self.dt = 0.02 #secs
+        self.dt = 0.002 #secs
         
         
         self.client = carla.Client('localhost',2000)
@@ -84,7 +83,7 @@ class CarEnv():
 
         # Data from the camera
 
-        # self.cam_sensor.listen(lambda data: self.process_img(data))
+        self.cam_sensor.listen(lambda image: image.save_to_disk('/home/dhagash/MS-GE-02/MSR-Project/output/%06d.png' % image.frame))
 
         #IMU Sensor
 
@@ -111,19 +110,27 @@ class CarEnv():
 
         # time.sleep(15)
 
-    def process_img(self, image):
+    # def process_img(self, image):
+    #     i = np.array(image.raw_data)
+    #     i2 =  i.reshape((480,640,4))
+    #     i3 = i2[:,:,:3]
 
-        print("Collecting Image")
+    #     cv2.imshow("",i3)
+    #     cv2.waitKey(1)
+
+    #     return i3/255.0
+
+        # print("Collecting Image")
 
     def destroy(self):
 
         for actors in self.actor_list:
             actors.destroy()
 
-    def keyboard_control(self):
+    def keyboard_control(self,running):
 
         for event in pygame.event.get():
-
+           
             if event.type == pygame.QUIT:
                 return
             elif event.type == pygame.KEYDOWN:          # check for key presses          
@@ -135,6 +142,8 @@ class CarEnv():
                     self.pressed_up = True
                 elif event.key == pygame.K_DOWN:     # down arrow goes down
                     self.pressed_down = True
+                elif event.key == pygame.K_ESCAPE:
+                   running = False
             
             elif event.type == pygame.KEYUP:        # check for key releases
                 if event.key == pygame.K_LEFT:        # left arrow turns left
@@ -169,17 +178,23 @@ class CarEnv():
             self.w=self.WMAX
         elif(self.w<-self.WMAX):
             self.w=-self.WMAX
-
+        
+        self.vehicle.apply_control(carla.VehicleControl(throttle=self.v/2,steer=self.w))
         print("Velocity %f and Angular Acceleration %f"%(self.v,self.w))
-
+        print("Velocity of vehicle",self.vehicle.get_velocity())
+        return running
         
 def main():
 
     env = CarEnv()
 
-    while True:
-        env.keyboard_control()
-        
+
+    pygame.init()
+    pygame.display.set_mode((100, 100))
+    running = True
+    while running:
+        running = env.keyboard_control(running)
+    pygame.quit()
     env.destroy()
 
 
