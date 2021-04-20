@@ -38,8 +38,9 @@ class CarEnv():
         self.thres_v = 0.05
         self.thres_w = 0.05
         self.dt = 0.002 #secs
-        
-        
+        self.reverse = False
+        self.b = 0
+        self.BMAX = 1.0
         self.client = carla.Client('localhost',2000)
         self.client.set_timeout(2.0)
 
@@ -83,7 +84,7 @@ class CarEnv():
 
         # Data from the camera
 
-        self.cam_sensor.listen(lambda image: image.save_to_disk('/home/dhagash/MS-GE-02/MSR-Project/output/%06d.png' % image.frame))
+        # self.cam_sensor.listen(lambda image: image.save_to_disk('/home/dhagash/MS-GE-02/MSR-Project/output/%06d.png' % image.frame))
 
         #IMU Sensor
 
@@ -144,6 +145,11 @@ class CarEnv():
                     self.pressed_down = True
                 elif event.key == pygame.K_ESCAPE:
                    running = False
+                elif event.key == pygame.K_r:
+                    self.reverse = True
+                elif event.key == pygame.K_n:
+                    self.reverse = False
+
             
             elif event.type == pygame.KEYUP:        # check for key releases
                 if event.key == pygame.K_LEFT:        # left arrow turns left
@@ -157,11 +163,12 @@ class CarEnv():
         if self.pressed_up:
             self.v = self.v+self.a*self.dt
         elif self.pressed_down:
-            self.v = self.v-self.a*self.dt
+            self.b = self.v-self.a*self.dt
         else:
             self.v = self.v*self.reduce_v
             if(abs(self.v)<self.thres_v):
                 self.v=0
+                self.b=0
         if self.pressed_left:
             self.w = self.w+self.al*self.dt
         elif self.pressed_right:
@@ -172,15 +179,17 @@ class CarEnv():
                 self.w=0
         if(self.v>self.VMAX):
             self.v=self.VMAX
-        elif(self.v<-self.VMAX):
-            self.v=-self.VMAX
+        
+        if(self.b>self.BMAX):
+            self.b=self.BMAX
+        
         if(self.w>self.WMAX):
             self.w=self.WMAX
         elif(self.w<-self.WMAX):
             self.w=-self.WMAX
         
-        self.vehicle.apply_control(carla.VehicleControl(throttle=self.v/2,steer=self.w))
-        print("Velocity %f and Angular Acceleration %f"%(self.v,self.w))
+        self.vehicle.apply_control(carla.VehicleControl(throttle=self.v/2,steer=self.w,reverse=self.reverse,brake = self.b))
+        # print("Velocity %f and Angular Acceleration %f"%(self.v,self.w))
         print("Velocity of vehicle",self.vehicle.get_velocity())
         return running
         
@@ -192,6 +201,7 @@ def main():
     pygame.init()
     pygame.display.set_mode((100, 100))
     running = True
+    
     while running:
         running = env.keyboard_control(running)
     pygame.quit()
