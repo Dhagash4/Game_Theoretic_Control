@@ -7,6 +7,8 @@ import cv2
 import numpy as np
 import pygame
 
+from datetime import datetime
+
 #Import CARLA anywhere on the system
 try:
     sys.path.append(glob.glob('/opt/carla-simulator/PythonAPI/carla/dist/carla-*%d.%d-%s.egg' % (sys.version_info.major,
@@ -37,13 +39,12 @@ class CarEnv():
         self.al=100
         self.thres_v = 0.05
         self.thres_w = 0.05
-        self.dt = 0.002 #secs
+        self.dt = 0.05 #secs
         self.reverse = False
         self.b = 0
         self.BMAX = 1.0
         self.client = carla.Client('localhost',2000)
         self.client.set_timeout(2.0)
-
         self.reduce_v= 0
         self.reduce_w = 0
         #World we want to have
@@ -89,6 +90,7 @@ class CarEnv():
         #IMU Sensor
 
         self.imu = self.world.get_blueprint_library().find('sensor.other.imu')
+        
 
 
         #Attaching imu to car
@@ -96,6 +98,9 @@ class CarEnv():
         self.imu_sensor = self.world.spawn_actor(self.imu, transform, attach_to=self.vehicle)
         self.actor_list.append(self.imu_sensor)
 
+        # Getting data from IMU
+
+        self.imu_sensor.listen(lambda sensor_data: self.process_imu_data(sensor_data))
 
         #GNSS Sensor
 
@@ -108,6 +113,8 @@ class CarEnv():
 
         self.gnss_sensor = self.world.spawn_actor(self.gnss, transform, attach_to=self.vehicle)
         self.actor_list.append(self.gnss_sensor)
+        
+        self.gnss_sensor.listen(lambda gnss_data: self.process_gnss_data(gnss_data))
 
         # time.sleep(15)
 
@@ -123,6 +130,26 @@ class CarEnv():
 
         # print("Collecting Image")
 
+    def process_imu_data(self,sensor_data):
+
+        with open("imu_data.txt","a+") as f:
+            #Frame,Timestamp,Accelerometer,Gyroscope,Compass
+            f.write("%d,%f,%f,%f,%f,%f,%f,%f,%f\n" %(sensor_data.frame,sensor_data.timestamp,sensor_data.accelerometer.x,sensor_data.accelerometer.y,sensor_data.accelerometer.z,\
+                sensor_data.gyroscope.x,sensor_data.gyroscope.y,sensor_data.gyroscope.z,sensor_data.compass))
+
+            f.close()
+
+
+    def process_gnss_data(self,gnss_data):
+
+        with open("gnss_data.txt","a+") as f:
+
+                # Frame, Timestamp,Latitude, Longitude
+                f.write("%d,%f,%f,%f\n" %(gnss_data.frame,gnss_data.timestamp,gnss_data.latitude,gnss_data.longitude))
+
+                f.close()
+
+    
     def destroy(self):
 
         for actors in self.actor_list:
@@ -178,8 +205,8 @@ class CarEnv():
             if(abs(self.w)<self.thres_w):
                 self.w=0
         if(self.v>self.VMAX):
-            self.v=self.VMAX
         
+            self.v=self.VMAX
         if(self.b>self.BMAX):
             self.b=self.BMAX
         
@@ -189,8 +216,8 @@ class CarEnv():
             self.w=-self.WMAX
         
         self.vehicle.apply_control(carla.VehicleControl(throttle=self.v/2,steer=self.w,reverse=self.reverse,brake = self.b))
-        # print("Velocity %f and Angular Acceleration %f"%(self.v,self.w))
-        print("Velocity of vehicle",self.vehicle.get_velocity())
+        print("Velocity %f and Angular Acceleration %f"%(self.v,self.w))
+        # print("Velocity of vehicle",self.vehicle.get_velocity())
         return running
         
 def main():
