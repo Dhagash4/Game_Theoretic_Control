@@ -66,27 +66,27 @@ def longitudinal_controller(v: float, v_des: float, prev_err: float, cumulative_
 
 def calculate_lookahead_index(robot: Robot, xs_des: list, ys_des: list(), Ld: float):
     # search nearest point index
-    dx = [robot.pos[0] - icx for icx in xs_des]
-    dy = [robot.pos[1] - icy for icy in ys_des]
-    d = [idx ** 2 + idy ** 2 for (idx, idy) in zip(dx, dy)]
-    ind = d.index(min(d))
-    distance_this_index = euclidean_distance(robot.pos, np.array([xs_des[ind], ys_des[ind]]))
-    while True:
-        ind = ind + 1 if (ind + 1) < len(xs_des) else ind
-        distance_next_index = euclidean_distance(robot.pos, np.array([xs_des[ind], ys_des[ind]]))
-        if distance_this_index <= distance_next_index:
-            break
-        distance_this_index = distance_next_index
+    dx = [robot.pos[0] - x for x in xs_des]
+    dy = [robot.pos[1] - y for y in ys_des]
+    d = np.sqrt(np.power(dx, 2) + np.power(dy, 2))
+    ind = np.argmin(d)
+
+    # Distance to this index
+    distance_this_index = d[ind]
 
     # search look ahead target point index
-    L = 0
-    while Ld > L and (ind + 1) < len(xs_des):
-        dx = xs_des[ind] - robot.pos[0]
-        dy = ys_des[ind] - robot.pos[1]
-        L = hypot(dx, dy)
-        ind += 1
+    L = distance_this_index
+    end_of_track = False
+    if distance_this_index < Ld:
+        while Ld > L and (ind + 1) < len(xs_des):
+            ind += 1
+            dx = xs_des[ind] - robot.pos[0]
+            dy = ys_des[ind] - robot.pos[1]
+            L = hypot(dx, dy)
+        if ind + 1 == len(xs_des):
+            end_of_track = True
 
-    return ind
+    return L, ind, end_of_track
 
 
 def lateral_controller(l_d: float, alpha: float, delta: float, cumulative_error: float, prev_err: float, tuning_param: list, dt: float):
@@ -124,18 +124,32 @@ def lateral_controller(l_d: float, alpha: float, delta: float, cumulative_error:
 if __name__=="__main__":
     # Robot initialization
     robot = Robot()
-    robot.pos = np.array([100, 0])
-    robot.theta = pi / 2
     robot.v = 0
     robot.delta = 0
 
     # Desired velocity
-    v_des = 10
+    v_des = 2
 
     # Define desired trajectory
-    angles = np.arange(0, 2 * pi, 0.05)
-    x_des = [np.cos(angle) * 100 for angle in angles]
-    y_des = [np.sin(angle) * 100 for angle in angles]
+
+    # Circle
+    # angles = np.arange(0, 2 * pi, 0.05)
+    # x_des = [np.cos(angle) * 100 for angle in angles]
+    # y_des = [np.sin(angle) * 100 for angle in angles]
+    # robot.pos = np.array([100, 0])
+    # robot.theta = pi / 2
+
+    # Line
+    # x_des = [0 for i in range(500)]
+    # y_des = [i for i in range(500)]
+    # robot.pos = np.array([10, 0])
+    # robot.theta = pi / 3
+
+    # Curve
+    x_des = np.arange(0, 100, 0.1)
+    y_des = [np.sin(x_i / 5.0) * x_i / 8.0 for x_i in x_des]
+    robot.pos = np.array([0, 5])
+    robot.theta = pi/10
 
     # Variables to log robot states
     x_traj = [robot.pos[0]]
@@ -145,7 +159,7 @@ if __name__=="__main__":
     delta_traj = [robot.delta]
 
     # Control Time Step
-    T = 75
+    T = 100
     dt = 0.1 # 10 Hz
     t = 0
 
@@ -155,8 +169,9 @@ if __name__=="__main__":
     err_delta = 0
     err_total_delta = 0
 
-    Ld = 2
+    Ld = 5
 
+    # PID tuning parameters
     kp_lon, kd_lon, ki_lon = 4.0, 0.15, 0.5
     kp_lat, kd_lat, ki_lat = 1.5, 0.01, 0.01
 
@@ -168,18 +183,22 @@ if __name__=="__main__":
         # TODO: compute control and update robot pose
         acc, err_v, err_total_v = longitudinal_controller(robot.v, v_des, err_v, err_total_v, [kp_lon, ki_lon, kd_lon], dt)
         
-        lookahead_idx = calculate_lookahead_index(robot, x_des, y_des, Ld)
-        l_d = euclidean_distance(robot.pos, np.array([x_des[lookahead_idx], y_des[lookahead_idx]]))
+        l_d, lookahead_idx, end_of_track = calculate_lookahead_index(robot, x_des, y_des, Ld)
+        if end_of_track:
+            v_des = l_d
+        else:
+            v_des = 2
+
         alpha = wrapToPi(np.arctan2((y_des[lookahead_idx] - robot.pos[1]), (x_des[lookahead_idx] - robot.pos[0])) - robot.theta)
         
         delta_dot, err_delta, err_total_delta = lateral_controller(l_d, alpha, robot.delta, err_total_delta, err_delta, [kp_lat, ki_lat, kd_lat], dt)
-            
+        
         robot.apply_control(acc, delta_dot, dt)
 
         # update time
         t = t + dt
         
-        # save varaibles for plotting
+        # Track varaibles for plotting
         x_traj.append(robot.pos[0])
         y_traj.append(robot.pos[1])
         theta_traj.append(robot.theta)
@@ -189,8 +208,8 @@ if __name__=="__main__":
         acc_hist.append(acc)
         steer_hist.append(delta_dot)
 
+    # Save data
     data = np.dstack((x_traj, y_traj, theta_traj, v_traj, delta_traj, acc_hist, steer_hist))
-    print(data)
     np.savetxt('data.txt', data[0])
     
     # Plot trajectory
