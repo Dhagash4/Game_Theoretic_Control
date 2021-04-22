@@ -1,0 +1,38 @@
+DS_Store
+*.pyc
+.vscode/
+.ipynb_checkpoints/
+__pycache__/
+.Python
+MANIFEST
+
+
+# Debug Files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Build Folder
+build/
+cmake/
+
+# Object Files
+*.o
+*.ko
+*.obj
+*.elf
+*.so
+
+# Linker Outputs
+*.ilk
+*.map
+*.exp
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Miscellaneous
+*.zip
+*.txt
