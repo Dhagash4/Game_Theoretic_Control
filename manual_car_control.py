@@ -50,6 +50,7 @@ class CarEnv():
         #World we want to have
 
         self.world = self.client.get_world()
+        
 
         #Selecting the vehicle
 
@@ -216,14 +217,24 @@ class CarEnv():
             self.w=-self.WMAX
         
         self.vehicle.apply_control(carla.VehicleControl(throttle=self.v/2,steer=self.w,reverse=self.reverse,brake = self.b))
-        print("Velocity %f and Angular Acceleration %f"%(self.v,self.w))
+        # print("Velocity %f and Angular Acceleration %f"%(self.v,self.w))
         # print("Velocity of vehicle",self.vehicle.get_velocity())
         return running
+    
+    def get_waypoints(self):
+
+        waypoint = self.world.get_map().get_waypoint(self.vehicle.get_location(),project_to_road=True, lane_type=(carla.LaneType.Driving)).next_until_lane_end(5.0)
+        print(np.shape(waypoint))
+        for wp in waypoint:
+            print(wp)
+        
+
         
 def main():
 
     env = CarEnv()
 
+    env.get_waypoints()
 
     pygame.init()
     pygame.display.set_mode((100, 100))
