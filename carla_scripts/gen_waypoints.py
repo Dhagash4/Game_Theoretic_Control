@@ -51,26 +51,11 @@ def main():
         # Get Map of the world
         my_map = world.get_map()
 
-        # Get all the blueprints available in the world
-        blueprint_library = world.get_blueprint_library()
-
-        # Load Tesla Model 3 blueprint -- Why Not??
-        tesla_bp = blueprint_library.find('vehicle.tesla.model3')
-
         # Get waypoints for all road ids in the given map
-        print("Extracting waypoints in the map.........")
+        print("Extracting waypoints in the map....")
         waypoint_list_20 = my_map.get_waypoint_xodr(20, -1, 3).next_until_lane_end(3.0) 
         waypoint_list_21 = my_map.get_waypoint_xodr(21, -1, 3).next_until_lane_end(3.0) 
         print("{} Waypoints extracted successfully".format(len(waypoint_list_20) + len(waypoint_list_21)))
-
-        # Spawn vehicle at first waypoint
-        spawn_tesla = waypoint_list_20[0].transform
-        spawn_tesla.location.z += 2
-        vehicle = world.spawn_actor(tesla_bp, spawn_tesla)
-        print('Spawned vehicle at x:{} y:{} yaw:{}'.format(spawn_tesla.location.x, spawn_tesla.location.y, spawn_tesla.rotation.yaw))
-
-        # Append the vehicle actor to the actor list
-        actor_list.append(vehicle)
 
         time.sleep(5)
 
@@ -79,7 +64,7 @@ def main():
         y = []
         yaw = []
 
-        print('Visualizing all waypoints')
+        print('Visualizing all waypoints....')
 
         for waypoint in waypoint_list_20:
             world.debug.draw_string(waypoint.transform.location, 'O', draw_shadow=False,
@@ -104,9 +89,9 @@ def main():
 
     finally:
         input('Press any key to destroy all actors in the simulation')
-        print('destroying actors...')
+        print('destroying actors....')
         client.apply_batch([carla.command.DestroyActor(x) for x in actor_list])
-        print('done.')
+        print('done')
 
 if __name__=='__main__':
     main()
