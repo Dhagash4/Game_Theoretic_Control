@@ -37,9 +37,6 @@ import numpy as np
 
 
 def main():
-    # Keep track of all spawned actors
-    actor_list = []
-
     try:
         # Connect to client
         client = carla.Client('localhost', 2000)
@@ -53,8 +50,8 @@ def main():
 
         # Get waypoints for all road ids in the given map
         print("Extracting waypoints in the map....")
-        waypoint_list_20 = my_map.get_waypoint_xodr(20, -1, 3).next_until_lane_end(3.0) 
-        waypoint_list_21 = my_map.get_waypoint_xodr(21, -1, 3).next_until_lane_end(3.0) 
+        waypoint_list_20 = my_map.get_waypoint_xodr(20, -1, 1).next_until_lane_end(1.0) 
+        waypoint_list_21 = my_map.get_waypoint_xodr(21, -1, 1).next_until_lane_end(1.0) 
         print("{} Waypoints extracted successfully".format(len(waypoint_list_20) + len(waypoint_list_21)))
 
         time.sleep(5)
@@ -88,9 +85,6 @@ def main():
         print('2D waypoints saved in \'2D_waypoints.txt\'')
 
     finally:
-        input('Press any key to destroy all actors in the simulation')
-        print('destroying actors....')
-        client.apply_batch([carla.command.DestroyActor(x) for x in actor_list])
         print('done')
 
 if __name__=='__main__':
