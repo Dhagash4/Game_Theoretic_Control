@@ -36,3 +36,6 @@ cmake/
 # Miscellaneous
 *.zip
 *.txt
+*.pickle
+*.log
+*.csv
