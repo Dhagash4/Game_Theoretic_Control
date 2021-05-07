@@ -55,8 +55,6 @@ class CarEnv():
     def __init__(self, spawn_pose: np.ndarray):
         '''
         Initialize car environment
-        Arg:
-            spawn_pose: Vehicle spawn pose [x, y, heading]
         '''
         # Connect to client
         self.client = carla.Client('localhost',2000)
@@ -69,12 +67,31 @@ class CarEnv():
         self.map = self.world.get_map()
         
         # Get all the blueprints available in the world
-        blueprint_library =  self.world.get_blueprint_library()
+        self.blueprint_library =  self.world.get_blueprint_library()
+        
+        # Initialize state dataclass list to log subsequent state information
+        self.states = []
 
+        # Initialize control dataclass list to log subsequent control commands
+        self.controls = []
+
+        # Data for longitudinal controller
+        self.vel_control = [velocity_control_var(0.0, 0.0)]
+
+        # Track errors
+        self.errors = []
+
+
+    def spawn_vehicle_2D(self, spawn_pose):
+        '''
+        Spawn a Vehicle at given 2D pose
+        Arg:
+            spawn_pose: Vehicle spawn pose [x, y, heading]
+        '''
         # Load Tesla Model 3 blueprint
-        self.car_model = blueprint_library.find('vehicle.tesla.model3')
+        self.car_model = self.blueprint_library.find('vehicle.tesla.model3')
 
-        # Spawn vehicle at first waypoint
+        # Spawn vehicle at given pose
         self.spawn_point = carla.Transform(carla.Location(spawn_pose[0], spawn_pose[1], 2), carla.Rotation(0, spawn_pose[2], 0))
         self.vehicle =  self.world.spawn_actor(self.car_model, self.spawn_point)
 
@@ -85,18 +102,13 @@ class CarEnv():
         self.actor_list = []
         # Append our vehicle to actor list
         self.actor_list.append(self.vehicle)
-        
-        # Initialize state dataclass list to log subsequent state information
-        self.states = [state(spawn_pose[0], spawn_pose[1], spawn_pose[2], 0.0)]
 
-        # Initialize control dataclass list to log subsequent control commands
-        self.controls = [control(0.0, 0.0, 0.0)]
 
-        # Data for longitudinal controller
-        self.vel_control = [velocity_control_var(0.0, 0.0)]
-
-        # Track errors
-        self.errors = []
+    def read_waypoints_file(self, path):
+        ''' Read waypoints list
+        '''
+        self.waypoints = np.loadtxt(path)
+        return self.waypoints
 
 
     def save_log(self, filename: str, data: object):
@@ -228,9 +240,14 @@ class CarEnv():
             # Find nearest waypoint
             idx, d = self.calculate_target_index(x, y, x_des, y_des, 3)
 
+            # Stop at end of track
             if idx == waypoints.shape[0]:
                 endpoint_reached = True
                 v_des = 0.0
+                while v != 0.0:
+                    self.vehicle.apply_control(carla.VehicleControl(throttle = 0, steer = 0, reverse = False, brake = 0.25))
+                    v = np.sqrt((self.vehicle.get_velocity().x) ** 2 + (self.vehicle.get_velocity().y) ** 2)
+                break
 
             # Visualize waypoints
             self.world.debug.draw_string(carla.Location(waypoints[idx, 0], waypoints[idx, 1], 2), '.', draw_shadow=False,
@@ -273,30 +290,26 @@ class CarEnv():
                 throttle = _throttle, steer = _steer, reverse = False, brake = _brake))
             
         
-def read_waypoints_file(path):
-    ''' Read waypoints list
-    '''
-    waypoints = np.loadtxt(path)
-    return waypoints
-
-        
 def main():
     try:
-        # Load waypoints
-        waypoints = read_waypoints_file("2D_waypoints.txt")
-
         # Initialize car environment
-        spawn_pose = waypoints[0]
         env = CarEnv(spawn_pose)
+
+        # Load waypoints
+        waypoints = env.read_waypoints_file("2D_waypoints.txt")
+
+        # Spawn a vehicle at spawn_pose
+        spawn_pose = waypoints[0]
+        env.spawn_vehicle_2D(spawn_pose)
 
         # Initialize control loop
         env.stanley_control(waypoints)
     
     finally:
         # Save all Dataclass object lists to a file
-        self.save_log('states.pickle', self.states)
-        self.save_log('controls.pickle', self.controls)
-        self.save_log('errors.pickle', self.errors)
+        env.save_log('states.pickle', self.states)
+        env.save_log('controls.pickle', self.controls)
+        env.save_log('errors.pickle', self.errors)
 
         env.destroy()
 
