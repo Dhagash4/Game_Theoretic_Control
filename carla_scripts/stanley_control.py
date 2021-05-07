@@ -1,11 +1,11 @@
 import os
 import sys
+import getopt
 import glob
 import time
+import pickle
 import logging
 import numpy as np
-from typing import Optional
-from datetime import datetime
 from dataclasses import dataclass
 
 from util import *
@@ -20,29 +20,37 @@ except IndexError:
 
 import carla
 
+# Class to store states
 @dataclass
 class state():
-    def __init__(self, time, pose_x, pose_y, pose_yaw, velocity):
+    def __init__(self, time, pose_x, pose_y, pose_yaw, velocity, lap_num):
         self.time = time
         self.pose_x = pose_x
         self.pose_y = pose_y
         self.pose_yaw = pose_yaw
         self.velocity = velocity
+        self.lap_num = lap_num
 
+# Class to store control commands
 @dataclass
 class control():
-    def __init__(self, time, throttle, brake, steer):
+    def __init__(self, time, throttle, brake, steer, lap_num):
         self.time = time
         self.throttle = throttle
         self.brake = brake
         self.steer = steer
+        self.lap_num = lap_num
 
+# Class to store tracking errors
 @dataclass
 class track_error():
-    def __init__(self, heading_error, crosstrack_error):
+    def __init__(self, time, heading_error, crosstrack_error, lap_num):
+        self.time = time
         self.heading_error = heading_error
         self.crosstrack_error = crosstrack_error
+        self.lap_num = lap_num
 
+# Class to store longitudinal controller error params
 @dataclass
 class velocity_control_var():
     def __init__(self, prev_error, acc_error):
@@ -52,10 +60,10 @@ class velocity_control_var():
 
 class CarEnv():
 
-    def __init__(self, spawn_pose: np.ndarray):
-        '''
-        Initialize car environment
-        '''
+    def __init__(self):
+        """
+        Initialize simulation environment
+        """
         # Connect to client
         self.client = carla.Client('localhost',2000)
         self.client.set_timeout(2.0)
@@ -82,12 +90,12 @@ class CarEnv():
         self.errors = []
 
 
-    def spawn_vehicle_2D(self, spawn_pose):
-        '''
+    def spawn_vehicle_2D(self, spawn_pose: np.ndarray):
+        """
         Spawn a Vehicle at given 2D pose
         Arg:
             spawn_pose: Vehicle spawn pose [x, y, heading]
-        '''
+        """
         # Load Tesla Model 3 blueprint
         self.car_model = self.blueprint_library.find('vehicle.tesla.model3')
 
@@ -104,46 +112,72 @@ class CarEnv():
         self.actor_list.append(self.vehicle)
 
 
-    def read_waypoints_file(self, path):
-        ''' Read waypoints list
-        '''
-        self.waypoints = np.loadtxt(path)
-        return self.waypoints
+    def read_file(self, path: str, delimiter: str = ' ') -> (np.ndarray):
+        """ Read data from a file
+        Args:
+            - path: Path of ASCII file to read
+            - delimiter: Delimiter character for the file to be read
+        
+        Returns:
+            - data: Data from file as a numpy array
+        """
+        self.data = np.loadtxt(path, delimiter=delimiter)
+        return self.data
 
 
     def save_log(self, filename: str, data: object):
         """
-        Logging data
+        Logging data to a .pickle file
         Args:
-        filename: name of the file to store data
-        data: data to be logged
+            filename: Name of the file to store data
+            data: Data to be logged
         """
         with open(filename, "wb") as f:
-            pickle.dump(data_my, f)
+            pickle.dump(data, f)
 
 
     def destroy(self):
-        ''' 
+        """ 
         Destroy all actors in the world
-        '''
+        """
         for actor in self.actor_list:
             actor.destroy()
+
+
+    def set_tuning_params(self, kp: float = 0.5, ki: float = 0.0, kd: float = 0.1, ke: float = 0.1, kv: float = 10.0):
+        """
+        Set the tuning parameters for longitudinal controller and lateral controller
+        Args:
+            - kp: Proportional Gain
+            - ki: Integral Gain
+            - kd: Differential Gain
+            - ke: Lateral Tracking Gain
+            - kv: Low Velocity Gain
+        """
+        # PID control gains
+        self.kp = kp
+        self.ki = ki        
+        self.kd = kd
+
+        # Crosstrack error control gains
+        self.ke = ke
+        self.kv = kv
 
 
     def longitudinal_controller(self, v: float, v_des: float, prev_err: float, cumulative_error: float, tuning_params: list, dt: float) -> (float, float, float):
         """
         Compute control signal (acceleration/deceleration) for linear velocity control
         Args:
-            - v: current velocity
-            - v_des: velocity setpoint
-            - prev_error: velocity error from previous control loop iteration for derivative controller
-            - cumulative_error: accumulated error over all previous control loop iterations for integral controller
+            - v: Current velocity
+            - v_des: Velocity setpoint
+            - prev_error: Velocity error from previous control loop iteration for derivative controller
+            - cumulative_error: Accumulated error over all previous control loop iterations for integral controller
             - tuning_params: [kp, ki, kd] PID controller tuning parameters
             - dt: Controller time step
         Returns:
-            - acc: acceleration/deceleration control signal
-            - curr_err: velocity error from the current control loop
-            - cumulative_error: accumulated error upto current control loop
+            - acc: Acceleration/deceleration control signal
+            - curr_err: Velocity error from the current control loop
+            - cumulative_error: Accumulated error upto current control loop
         """
         # Extract PID tuning parameters
         [kp, ki, kd] = tuning_params
@@ -159,15 +193,15 @@ class CarEnv():
         return acc, curr_err, cumulative_error
 
 
-    def calculate_target_index(self, x_r: float, y_r: float, xs_des: np.ndarray, ys_des: np.ndarray, lookahead_idx: Optional[int] = 2) -> (int, float):
+    def calculate_target_index(self, x_r: float, y_r: float, xs_des: np.ndarray, ys_des: np.ndarray, lookahead_idx: int = 2) -> (int, float):
         """
         Compute the waypoint index which is 'lookahead_idx' indices ahead of the closest waypoint to the current robot position
         Args:
-            - x_r: vehicle's x position in world frame
-            - y_r: vehicle's y position in world frame
-            - xs_des: desired trajectory x coordinates in world frame
-            - ys_des: desired trajectory y coordinates in world frame
-            - lookahead_idx: number of indices to lookahead from the nearest waypoint to the vehicle
+            - x_r: Vehicle's x position in world frame
+            - y_r: Vehicle's y position in world frame
+            - xs_des: Desired trajectory x coordinates in world frame
+            - ys_des: Desired trajectory y coordinates in world frame
+            - lookahead_idx: Number of indices to lookahead from the nearest waypoint to the vehicle
 
         Returns:
             - idx: waypoint index
@@ -177,12 +211,19 @@ class CarEnv():
         dx = [x_r - x for x in xs_des]
         dy = [y_r - y for y in ys_des]
         dist = np.sqrt(np.power(dx, 2) + np.power(dy, 2))
-        min_ind = (np.argmin(dist) + lookahead_idx) % len(xs_des)
-        min_dist = dist[min_ind]
+        idx = (np.argmin(dist) + lookahead_idx) % len(xs_des)
+        d = dist[idx]
 
         return idx, d
 
-    def stanley_control(self, waypoints):
+
+    def stanley_control(self, waypoints: np.ndarray, laps_required: int):
+        """
+        Deploy Stanley Control Paradigm for vehicle control
+        Args:
+            - waypoints: Desired trajectory for vehicle (x, y, yaw)
+            - laps_required: Number of laps to be completed
+        """
         #Applying Control to the Car
 
         # Desired velocity [m/s]
@@ -196,28 +237,10 @@ class CarEnv():
         # Initial velocity error
         err_v = v_des - np.sqrt((self.vehicle.get_velocity().x) ** 2 + (self.vehicle.get_velocity().y) ** 2)
 
-        # Crosstrack error control gains
-        # Smooth recovery
-        self.ke = 0.1
-        # Low velocity gain
-        self.kv = 10
+        prev_idx = 0
+        laps_completed = 0
 
-        # PID tuning parameters
-        kp_lon, kd_lon, ki_lon = 0.5, 0.1, 0.0
-
-        self.track_idx = []
-        self.track_d = []
-                
-        self.track_x_des = []        
-        self.track_y_des = []
-        self.track_yaw_des = []
-
-        i = 0
-
-        endpoint_reached = False
-        while not endpoint_reached:
-            i += 1
-
+        while 1:
             x = self.vehicle.get_transform().location.x
             y = self.vehicle.get_transform().location.y
             yaw = self.vehicle.get_transform().rotation.yaw     # [degrees]
@@ -227,27 +250,32 @@ class CarEnv():
             self.snapshot = self.world.wait_for_tick()
             curr_t = self.snapshot.timestamp.elapsed_seconds # [seconds]
             
-            self.states.append(state(curr_t, x, y, yaw, v))
-
             # Velocity control
             dt = curr_t - self.states[-1].time
 
-            acc, v_error, acc_error = self.longitudinal_controller(
-                v, v_des, self.vel_control[-1].prev_err, self.vel_control[-1].acc_error, [kp_lon, ki_lon, kd_lon], dt)
+            # Append state
+            self.states.append(state(curr_t, x, y, yaw, v, laps_completed))
 
+            # Longitudinal Controller
+            acc, v_error, acc_error = self.longitudinal_controller(
+                v, v_des, self.vel_control[-1].prev_err, self.vel_control[-1].acc_error, [self.kp, self.ki, self.kd], dt)
+
+            # Append longitudinal controller error
             self.vel_control.append(velocity_control_var(v_error, acc_error))
 
             # Find nearest waypoint
             idx, d = self.calculate_target_index(x, y, x_des, y_des, 3)
 
             # Stop at end of track
-            if idx == waypoints.shape[0]:
-                endpoint_reached = True
-                v_des = 0.0
-                while v != 0.0:
-                    self.vehicle.apply_control(carla.VehicleControl(throttle = 0, steer = 0, reverse = False, brake = 0.25))
-                    v = np.sqrt((self.vehicle.get_velocity().x) ** 2 + (self.vehicle.get_velocity().y) ** 2)
-                break
+            if (idx == waypoints.shape[0] - 1) and idx != prev_idx:
+                laps_completed += 1
+                if laps_completed == laps_required:
+                    while v != 0.0:
+                        self.vehicle.apply_control(carla.VehicleControl(throttle = 0, steer = 0, reverse = False, brake = 0.2))
+                        v = np.sqrt((self.vehicle.get_velocity().x) ** 2 + (self.vehicle.get_velocity().y) ** 2)
+                    break
+            
+            prev_idx = idx
 
             # Visualize waypoints
             self.world.debug.draw_string(carla.Location(waypoints[idx, 0], waypoints[idx, 1], 2), '.', draw_shadow=False,
@@ -263,13 +291,12 @@ class CarEnv():
             # Crosstrack error in yaw [radians]
             psi_c = np.arctan2(self.ke * np.sign(yaw_diff) * d, self.kv + v)
 
-            self.errors.append(track_error(psi_h, psi_c))
+            self.errors.append(track_error(curr_t, psi_h, psi_c, laps_completed))
 
             # Steering angle control
             _steer = np.degrees(wrapToPi(psi_h + psi_c))  # uncontrained in degrees
             _steer = max(min(_steer, self.max_steer_angle), -self.max_steer_angle)
             _steer = (_steer)/self.max_steer_angle # constrained to [-1, 1]
-            self.track_steer.append(_steer)
 
             # Split velocity control into throttle and brake and constrain them to [0, 1]
             if acc >= 0:
@@ -282,35 +309,69 @@ class CarEnv():
                 _brake = np.tanh(abs(acc))
                 if (_brake - self.controls[-1].brake) > 0.1:
                     _brake = self.controls[-1].brake + 0.1
-
-            self.controls.append(control(curr_t, _throttle, _brake, _steer))
+            
+            # Append control data 
+            self.controls.append(control(curr_t, _throttle, _brake, _steer, laps_completed))
             
             # Apply control
             self.vehicle.apply_control(carla.VehicleControl(
                 throttle = _throttle, steer = _steer, reverse = False, brake = _brake))
             
-        
+
 def main():
     try:
         # Initialize car environment
-        env = CarEnv(spawn_pose)
+        env = CarEnv()
 
         # Load waypoints
-        waypoints = env.read_waypoints_file("2D_waypoints.txt")
+        waypoints = env.read_file("../Data/2D_waypoints.txt")
 
         # Spawn a vehicle at spawn_pose
         spawn_pose = waypoints[0]
         env.spawn_vehicle_2D(spawn_pose)
 
+        # Set controller tuning params
+        # Default params
+        num_of_laps = 2
+        kp, ki, kd, ke, kv = [0.5, 0.0, 0.1, 0.1, 10.0]
+
+        # Read command line args
+        argv = sys.argv[1:]
+        if len(argv) != 0:
+            opts, args = getopt.getopt(argv, shortopts='e:v:p:i:d:n:', longopts=['ke', 'kv', 'kp', 'ki', 'kd', 'nlaps'])
+            for tup in opts:
+                if tup[0] == '-e':
+                    ke = float(tup[1])                    
+                elif tup[0] == '-v':
+                    kv = float(tup[1])
+                elif tup[0] == '-p':
+                    kp = float(tup[1])
+                elif tup[0] == '-i':
+                    ki = float(tup[1])
+                elif tup[0] == '-d':
+                    kd = float(tup[1])
+                elif tup[0] == '-n':
+                    num_of_laps = int(tup[1])
+
+            env.set_tuning_params(kp, ki, kd, ke, kv)
+        else:
+            env.set_tuning_params()
+
+        # Append initial state and controls
+        curr_t = env.world.wait_for_tick().timestamp.elapsed_seconds # [seconds]
+        env.states.append(state(curr_t, spawn_pose[0], spawn_pose[1], spawn_pose[2], 0.0, 0))
+        env.controls.append(control(curr_t, 0.0, 0.0, 0.0, 0))
+
         # Initialize control loop
-        env.stanley_control(waypoints)
+        env.stanley_control(waypoints, num_of_laps)
     
     finally:
         # Save all Dataclass object lists to a file
-        env.save_log('states.pickle', self.states)
-        env.save_log('controls.pickle', self.controls)
-        env.save_log('errors.pickle', self.errors)
+        env.save_log('../Data/states_ke(%f)_kv(%f)_kp(%f)_ki(%f)_kd(%f)_laps(%f).pickle'%(env.ke, env.kv, env.kp, env.ki, env.kd, num_of_laps), env.states)
+        env.save_log('../Data/controls_ke(%f)_kv(%f)_kp(%f)_ki(%f)_kd(%f)_laps(%f).pickle'%(env.ke, env.kv, env.kp, env.ki, env.kd, num_of_laps), env.controls)
+        env.save_log('../Data/errors_ke(%f)_kv(%f)_kp(%f)_ki(%f)_kd(%f)_laps(%f).pickle'%(env.ke, env.kv, env.kp, env.ki, env.kd, num_of_laps), env.errors)
 
+        # Destroy all actors in the simulation
         env.destroy()
 
 
