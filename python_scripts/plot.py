@@ -30,7 +30,8 @@ if __name__=='__main__':
     x_gt = np.array([d.pose_x for d in data])
     y_gt = np.array([d.pose_y for d in data])
     yaw_gt = np.array([d.pose_yaw for d in data])
-    velocity = np.array([d.velocity for d in data])
+    v_lon = np.array([d.v_lon for d in data])
+    v_lat = np.array([d.v_lat for d in data])
 
     # Read control commands
     filename = '../Data/controls_e(0.100000)_v(5.000000)_p(0.500000)_i(0.010000)_d(0.150000)_n(1.000000).pickle'
@@ -51,15 +52,15 @@ if __name__=='__main__':
     heading_error = np.array([d.heading_error for d in data])
     crosstrack_error = np.array([d.crosstrack_error for d in data])
 
-
     # Velocity Plot
     plt.figure('Velocity Control')
-    plt.plot(t_states - t_states[0], velocity, 'r')
+    plt.plot(t_states - t_states[0], v_lon, 'g')
+    plt.plot(t_states - t_states[0], v_lat, 'r')
     plt.axhline(14)
     plt.xlabel("Time [$s$]", fontsize='large')
     plt.ylabel("Velocity [$m/s$]", fontsize='large')
     plt.title("Velocity Tracking", fontsize='large')
-    plt.legend(['Ground truth velocity', 'Setpoint velocity'], fontsize='large')
+    plt.legend(['Ground truth longitudinal velocity', 'Ground truth lateral velocity', 'Setpoint longitudinal velocity'], fontsize='large')
     plt.show()
 
     # Heading Error Plot

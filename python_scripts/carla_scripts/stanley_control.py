@@ -217,8 +217,10 @@ class CarEnv():
             x = self.vehicle.get_transform().location.x
             y = self.vehicle.get_transform().location.y
             yaw = self.vehicle.get_transform().rotation.yaw     # [degrees]
-
-            v = np.sqrt((self.vehicle.get_velocity().x) ** 2 + (self.vehicle.get_velocity().y) ** 2)
+                        
+            v_lon = self.vehicle.get_velocity().x * np.cos(np.radians(yaw)) + self.vehicle.get_velocity().y * np.sin(np.radians(yaw))
+            v_lat = -self.vehicle.get_velocity().x * np.sin(np.radians(yaw)) + self.vehicle.get_velocity().y * np.cos(np.radians(yaw))
+            print(v_lon, v_lat)
 
             self.snapshot = self.world.wait_for_tick()
             curr_t = self.snapshot.timestamp.elapsed_seconds # [seconds]
@@ -227,11 +229,11 @@ class CarEnv():
             dt = curr_t - self.states[-1].time
 
             # Append state
-            self.states.append(state(curr_t, x, y, yaw, v, laps_completed))
+            self.states.append(state(curr_t, x, y, yaw, v_lon, v_lat, laps_completed))
 
             # Longitudinal Controller
             acc, v_error, acc_error = self.longitudinal_controller(
-                v, v_des, self.vel_control[-1].prev_err, self.vel_control[-1].acc_error, [self.kp, self.ki, self.kd], dt)
+                v_lon, v_des, self.vel_control[-1].prev_err, self.vel_control[-1].acc_error, [self.kp, self.ki, self.kd], dt)
 
             # Append longitudinal controller error
             self.vel_control.append(velocity_control_var(v_error, acc_error))
@@ -243,9 +245,10 @@ class CarEnv():
             if (idx == waypoints.shape[0] - 1) and idx != prev_idx:
                 laps_completed += 1
                 if laps_completed == laps_required:
-                    while v != 0.0:
+                    while v_lon != 0.0:
                         self.vehicle.apply_control(carla.VehicleControl(throttle = 0, steer = 0, reverse = False, brake = 0.2))
-                        v = np.sqrt((self.vehicle.get_velocity().x) ** 2 + (self.vehicle.get_velocity().y) ** 2)
+                        v_lon = self.vehicle.get_velocity().x * np.cos(np.radians(yaw)) + self.vehicle.get_velocity().y * np.sin(np.radians(yaw))
+                        v_lat = self.vehicle.get_velocity().x * np.sin(np.radians(yaw)) - self.vehicle.get_velocity().y * np.cos(np.radians(yaw))
                     break
             
             prev_idx = idx
@@ -262,7 +265,7 @@ class CarEnv():
             yaw_diff = wrapToPi(yaw_des[idx] - np.arctan2(y - y_des[idx], x - x_des[idx]))
         
             # Crosstrack error in yaw [radians]
-            psi_c = np.arctan2(self.ke * np.sign(yaw_diff) * d, self.kv + v)
+            psi_c = np.arctan2(self.ke * np.sign(yaw_diff) * d, self.kv + v_lon)
 
             self.errors.append(track_error(curr_t, psi_h, psi_c, laps_completed))
 
@@ -293,6 +296,9 @@ class CarEnv():
 
 def main():
     try:
+        # Data logging flag
+        save_flag = False
+
         # Initialize car environment
         env = CarEnv()
 
@@ -305,13 +311,13 @@ def main():
 
         # Set controller tuning params
         # Default params
-        num_of_laps = 2
+        num_of_laps = 1
         kp, ki, kd, ke, kv = [0.5, 0.01, 0.15, 0.1, 5.0]
 
         # Read command line args
         argv = sys.argv[1:]
         if len(argv) != 0:
-            opts, args = getopt.getopt(argv, shortopts='e:v:p:i:d:n:', longopts=['ke', 'kv', 'kp', 'ki', 'kd', 'nlaps'])
+            opts, args = getopt.getopt(argv, shortopts='e:v:p:i:d:n:s:', longopts=['ke', 'kv', 'kp', 'ki', 'kd', 'nlaps', 'save'])
             for tup in opts:
                 if tup[0] == '-e':
                     ke = float(tup[1])                    
@@ -325,6 +331,8 @@ def main():
                     kd = float(tup[1])
                 elif tup[0] == '-n':
                     num_of_laps = int(tup[1])
+                elif tup[0] == '-s':
+                    save_flag = True
 
             env.set_tuning_params(kp, ki, kd, ke, kv)
         else:
@@ -332,17 +340,18 @@ def main():
 
         # Append initial state and controls
         curr_t = env.world.wait_for_tick().timestamp.elapsed_seconds # [seconds]
-        env.states.append(state(curr_t, spawn_pose[0], spawn_pose[1], spawn_pose[2], 0.0, 0))
+        env.states.append(state(curr_t, spawn_pose[0], spawn_pose[1], spawn_pose[2], 0.0, 0.0, 0))
         env.controls.append(control(curr_t, 0.0, 0.0, 0.0, 0))
 
         # Initialize control loop
         env.stanley_control(waypoints, num_of_laps)
     
     finally:
+        if save_flag:
         # Save all Dataclass object lists to a file
-        env.save_log('../../Data/states_e(%f)_v(%f)_p(%f)_i(%f)_d(%f)_n(%f).pickle'%(env.ke, env.kv, env.kp, env.ki, env.kd, num_of_laps), env.states)
-        env.save_log('../../Data/controls_e(%f)_v(%f)_p(%f)_i(%f)_d(%f)_n(%f).pickle'%(env.ke, env.kv, env.kp, env.ki, env.kd, num_of_laps), env.controls)
-        env.save_log('../../Data/errors_e(%f)_v(%f)_p(%f)_i(%f)_d(%f)_n(%f).pickle'%(env.ke, env.kv, env.kp, env.ki, env.kd, num_of_laps), env.errors)
+            env.save_log('../../Data/states_e(%f)_v(%f)_p(%f)_i(%f)_d(%f)_n(%f).pickle'%(env.ke, env.kv, env.kp, env.ki, env.kd, num_of_laps), env.states)
+            env.save_log('../../Data/controls_e(%f)_v(%f)_p(%f)_i(%f)_d(%f)_n(%f).pickle'%(env.ke, env.kv, env.kp, env.ki, env.kd, num_of_laps), env.controls)
+            env.save_log('../../Data/errors_e(%f)_v(%f)_p(%f)_i(%f)_d(%f)_n(%f).pickle'%(env.ke, env.kv, env.kp, env.ki, env.kd, num_of_laps), env.errors)
 
         # Destroy all actors in the simulation
         env.destroy()

@@ -12,12 +12,13 @@ from dataclasses import dataclass
 # Class to store states
 @dataclass
 class state():
-    def __init__(self, time, pose_x, pose_y, pose_yaw, velocity, lap_num):
+    def __init__(self, time, pose_x, pose_y, pose_yaw, v_lon, v_lat, lap_num):
         self.time = time
         self.pose_x = pose_x
         self.pose_y = pose_y
         self.pose_yaw = pose_yaw
-        self.velocity = velocity
+        self.v_lon = v_lon
+        self.v_lat = v_lat
         self.lap_num = lap_num
 
 # Class to store control commands
