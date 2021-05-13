@@ -1,14 +1,22 @@
+#!/usr/bin/env python
+
 # Author: Saurabh Gupta
 # email: s7sagupt@uni-bonn.de
 # MSR Project Sem 2
 
 # Implementation of Pure Pursuit trajectory tracking control loop
 
+# ==============================================================================
+# -- imports -------------------------------------------------------------------
+# ==============================================================================
+import sys
 import numpy as np
 from math import fabs, pi, hypot
 from matplotlib import pyplot as plt
 
-from util import wrapToPi, euclidean_distance
+sys.path.append('..')
+
+from Common.util import wrapToPi
 
 # Bicycle model
 class Robot:
@@ -210,7 +218,6 @@ if __name__=="__main__":
 
     # Save data
     data = np.dstack((x_traj, y_traj, theta_traj, v_traj, delta_traj, acc_hist, steer_hist))
-    np.savetxt('data.txt', data[0])
     
     # Plot trajectory
     plt.cla()

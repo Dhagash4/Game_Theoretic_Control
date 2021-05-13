@@ -1,15 +1,19 @@
 #!/usr/bin/env python
 
+# @Authors: Saurabh Gupta ; Dhagash Desai
+# @email: s7sagupt@uni-bonn.de ; s7dhdesa@uni-bonn.de
+# MSR Project Sem 2
+
 from __future__ import print_function
 
-
 # ==============================================================================
-# -- find carla module ---------------------------------------------------------
+# -- imports -------------------------------------------------------------------
 # ==============================================================================
-
-import glob
 import os
 import sys
+import time
+import glob
+import numpy as np
 
 try:
     sys.path.append(glob.glob('../carla/dist/carla-*%d.%d-%s.egg' % (
@@ -19,18 +23,7 @@ try:
 except IndexError:
     pass
 
-# ==============================================================================
-# -- imports -------------------------------------------------------------------
-# ==============================================================================
-
 import carla
-
-import time
-import logging
-import math
-import random
-
-import numpy as np
 
 
 def main():
@@ -78,7 +71,7 @@ def main():
         
         # Stack x, y and yaw[degrees] in a single matrix and save it as ASCII file
         waypoints = np.vstack((x, y, yaw))
-        np.savetxt('2D_waypoints.txt', waypoints.T)
+        np.savetxt('../../Data/2D_waypoints.txt', waypoints.T)
         print('2D waypoints saved in \'2D_waypoints.txt\'')
 
     finally:

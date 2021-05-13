@@ -1,9 +1,14 @@
-# Author: Saurabh Gupta
-# email: s7sagupt@uni-bonn.de
+#!/usr/bin/env python
+
+# @Authors: Saurabh Gupta ; Dhagash Desai
+# @email: s7sagupt@uni-bonn.de ; s7dhdesa@uni-bonn.de
 # MSR Project Sem 2
 
 # Utility functions
 
+# ==============================================================================
+# -- imports -------------------------------------------------------------------
+# ==============================================================================
 import numpy as np
 from math import pi
 
