@@ -11,7 +11,7 @@
 # ==============================================================================
 import sys
 import numpy as np
-from math import fabs, pi, hypot
+from math import fabs, pi
 from matplotlib import pyplot as plt
 
 sys.path.append('..')

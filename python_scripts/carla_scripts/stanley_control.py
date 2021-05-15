@@ -12,7 +12,6 @@ import getopt
 import glob
 import pickle
 import numpy as np
-from dataclasses import dataclass
 from numpy.lib.utils import info
 
 sys.path.append('..')
@@ -287,7 +286,7 @@ class CarEnv():
                     _brake = self.controls[-1].brake + 0.1
             
             # Append control data 
-            self.controls.append(control(curr_t, _throttle, _brake, _steer, laps_completed))
+            self.controls.append(control(curr_t, _throttle, _brake, _throttle - _brake, _steer * self.max_steer_angle, laps_completed))
             
             # Apply control
             self.vehicle.apply_control(carla.VehicleControl(
@@ -341,7 +340,7 @@ def main():
         # Append initial state and controls
         curr_t = env.world.wait_for_tick().timestamp.elapsed_seconds # [seconds]
         env.states.append(state(curr_t, spawn_pose[0], spawn_pose[1], spawn_pose[2], 0.0, 0.0, 0))
-        env.controls.append(control(curr_t, 0.0, 0.0, 0.0, 0))
+        env.controls.append(control(curr_t, 0.0, 0.0, 0.0, 0.0, 0))
 
         # Initialize control loop
         env.stanley_control(waypoints, num_of_laps)

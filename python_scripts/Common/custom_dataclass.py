@@ -24,10 +24,11 @@ class state():
 # Class to store control commands
 @dataclass
 class control():
-    def __init__(self, time, throttle, brake, steer, lap_num):
+    def __init__(self, time, throttle, brake, acc, steer, lap_num):
         self.time = time
         self.throttle = throttle
         self.brake = brake
+        self.acc = acc
         self.steer = steer
         self.lap_num = lap_num
 
