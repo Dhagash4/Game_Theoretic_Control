@@ -31,41 +31,31 @@ except IndexError:
 
 import carla
 
-def nearest_state(curr_state, waypoints, vx_des, vy_des):
-    l = len(waypoints)
+def calculate_error(curr_state, ref_state, coeff, yaw_des):
+    theta = ref_state[2] 
+    x = cos(-theta) * (curr_state[0] - ref_state[0]) - sin(-theta) * (curr_state[1] - ref_state[1])
+    y = sin(-theta) * (curr_state[0] - ref_state[0]) - cos(-theta) * (curr_state[1] - ref_state[1])
+   
+    yaw = curr_state[2]
 
-    x_r = curr_state[0]
-    y_r = curr_state[1]
+    y_pred = coeff[0] * (x ** 2) + coeff[1] * x + coeff[2]
+    crosstrack = y_pred - y
 
-    nearest_state = [0, 0, 0, MX(vx_des), MX(vy_des)]
+    head_err = yaw_des - yaw
 
+    return MX(vcat([crosstrack, head_err]))
+
+
+def calculate_nearest_index(curr_state, waypoints: np.ndarray, curr_idx):
     # Search nearest waypoint index
-    dx = vcat([(x_r - pose[0])**2 for pose in waypoints])
-    dy = vcat([(y_r - pose[1])**2 for pose in waypoints])
-    dist_sq = dx + dy
+    dx = np.array([(curr_state[0] - x)**2 for x in waypoints[max(0, curr_idx - 10):curr_idx + 30, 0]])
+    dy = np.array([(curr_state[1] - y)**2 for y in waypoints[max(0, curr_idx - 10):curr_idx + 30, 1]])
+    i = range(max(0, curr_idx - 10), curr_idx + 30)
+    dist = dx + dy
 
-    waypoints = MX(hcat(waypoints))
-    
-    minimum = inf
-    idx_1 = 0
-    for i in range(l):
-        idx_1 = if_else(dist_sq[i] < minimum, i, idx_1)
-        minimum = if_else(dist_sq[i] < minimum, dist_sq[i], minimum)
+    idx = np.argmin(dist)
 
-    idx_2 = if_else(dist_sq[idx_1 + 1] < dist_sq[idx_1 - 1], idx_1 + 1, idx_1 - 1)
-
-    x1 = waypoints[0, idx_1]
-    y1 = waypoints[1, idx_1]
-    x2 = waypoints[0, idx_2]
-    y2 = waypoints[1, idx_2]
-
-    l = ((x2 ** 2) + (y2 ** 2) - (x1 * x2 + y1 * y2) + x_r * (x1 - x2) + y_r * (y1 - y2)) / (((x1 - x2) ** 2) + ((y1 - y2) ** 2))
-    
-    nearest_state[0] = l * waypoints[0, idx_1] + (1 - l) * waypoints[0, idx_2]
-    nearest_state[1] = l * waypoints[1, idx_1] + (1 - l) * waypoints[1, idx_2]
-    nearest_state[2] = l * waypoints[2, idx_1] + (1 - l) * waypoints[2, idx_2]
-
-    return MX(vcat(nearest_state))
+    return i[idx]
 
 
 class CarEnv():
@@ -109,7 +99,7 @@ class CarEnv():
         self.car_model = self.blueprint_library.find('vehicle.tesla.model3')
 
         # Spawn vehicle at given pose
-        self.spawn_point = carla.Transform(carla.Location(spawn_pose[0], spawn_pose[1], 2), carla.Rotation(0, spawn_pose[2], 0))
+        self.spawn_point = carla.Transform(carla.Location(spawn_pose[0], spawn_pose[1], 2), carla.Rotation(0, np.degrees(spawn_pose[2]), 0))
         self.vehicle =  self.world.spawn_actor(self.car_model, self.spawn_point)
 
         # Get max steering angle of car's front wheels
@@ -153,37 +143,6 @@ class CarEnv():
             actor.destroy()
 
 
-    # def nearest_state(self, x_r: float, y_r: float, yaw_r: float, waypoints: np.ndarray, vx_des, vy_des):
-    #     """Compute the nearest pose to the vehicle on the desired trajectory
-
-    #     Args:
-    #         - x_r: Vehicle's x position in world frame
-    #         - y_r: Vehicle's y position in world frame
-    #         - yaw_r: Vehicle's yaw in world frame
-    #         - waypoints: Desired trajectory coordinates [x, y, yaw] in world frame
-
-    #     Returns:
-    #         - nearest_pose: Nearest pose [x, y, yaw] on the desired trajectory to the vehicle
-    #     """
-    #     nearest_state = np.array([0, 0, 0, vx_des, vy_des])
-
-    #     # Search nearest waypoint index
-    #     dx = [x_r - x for x in waypoints[:, 0]]
-    #     dy = [y_r - y for y in waypoints[:, 1]]
-    #     dist_sq = np.power(dx, 2) + np.power(dy, 2)
-    #     idx_1 = np.argmin(dist_sq)
-    #     idx_2 = (idx_1 + 1) if (dist_sq[idx_1 + 1] < dist_sq[idx_1 - 1]) else (idx_1 - 1)
-
-    #     x1, y1, yaw1 = waypoints[idx_1, :]
-    #     x2, y2, yaw2 = waypoints[idx_2, :]
-
-    #     l = ((x2 ** 2) + (y2 ** 2) - (x1 * x2 + y1 * y2) + x_r * (x1 - x2) + y_r * (y1 - y2)) / (((x1 - x2) ** 2) + ((y1 - y2) ** 2))
-
-    #     nearest_state[:3] = l * waypoints[idx_1, :] + (1 - l) * waypoints[idx_2, :]  
-
-    #     return nearest_state.tolist()
-
-
     def get_true_state(self):
         """Get vehicles true state from the simulation
         
@@ -201,119 +160,122 @@ class CarEnv():
         return true_state
 
 
-    def mpc(self, waypoints: np.ndarray, laps_required: int):
+    def mpc(self, waypoints: np.ndarray, start_idx, laps_required: int):
         """Deploy Stanley Control Paradigm for vehicle control
 
         Args:
             - waypoints: Desired trajectory for vehicle (x, y, yaw)
             - laps_required: Number of laps to be completed
         """
+        # Wait for car to stabilize after spawning
+        while self.vehicle.get_velocity().z != 0:
+            pass
+        
+        curr_idx = start_idx
+        curr_state = self.get_true_state()
+
         # Desired velocity [m/s]
-        vx_des = 14.0
+        vx_des = 5.0
         vy_des = 0.0
 
         s = MX.sym('s', 5)
         x, y, yaw, vx, vy = s[0], s[1], s[2], s[3], s[4]
 
         u = MX.sym('u', 2)
-        acc, delta = [u[0], u[1]]   
+        acc, delta = [u[0], u[1]]
 
+        dt = MX.sym('dt')   
 
-        prediction = vertcat(x + sqrt(vx**2 + vy**2) * cos(atan2(tan(delta), 2) + yaw) * 0.03,
-                             y + sqrt(vx**2 + vy**2) * sin(atan2(tan(delta), 2) + yaw) * 0.03,
-                             yaw + (sqrt(vx**2 + vy**2) * tan(delta) * 0.03 / sqrt((19.8025) + (4.95 * tan(delta)**2))),
-                             vx + ((4.22 * acc) - (-0.0013 * sqrt(vx**2 + vy**2) * vx - 0.362 * vx)) * 0.03,
-                             vy - (1.318 * (atan2(vy, vx) - delta) + (-0.0013 * sqrt(vx**2 + vy**2) + 0.362) * vy) * 0.03)
-
-        pred = Function('pred', [s, u], [prediction])
+        prediction = vertcat(x + sqrt(vx**2 + vy**2) * cos(atan2(tan(delta), 2) + yaw) * dt,
+                            y + sqrt(vx**2 + vy**2) * sin(atan2(tan(delta), 2) + yaw) * dt,
+                            atan2(sin(yaw + (sqrt(vx**2 + vy**2) * tan(delta) * dt / sqrt((19.8025) + (4.95 * tan(delta)**2)))), cos(yaw + (sqrt(vx**2 + vy**2) * tan(delta) * 0.03 / sqrt((19.8025) + (4.95 * tan(delta)**2))))),
+                            vx + ((4.22 * acc) - (-0.0013 * sqrt(vx**2 + vy**2) * vx - 0.362 * vx)) * dt,
+                            vy - (1.318 * (atan2(vy, vx) - delta) + (-0.0013 * sqrt(vx**2 + vy**2) + 0.362) * vy) * dt)
+    
+        pred = Function('pred', [s, u, dt], [prediction])
 
         opti = Opti()
 
-        N = 1
-        s = opti.variable(5, N + 1)
-        e = opti.variable(5, N + 1)
-        u = opti.variable(2, N)
-        p = opti.parameter(5, 1)
-
-        opti.minimize(sumsqr(s))
-
-        for k in range(N):
-            opti.subject_to(e[:, k] == s[:, k] - nearest_state(s[:, k], waypoints, vx_des, vy_des))
-            opti.subject_to(s[:, k+1] == pred(s[:, k], u[:, k]))
-
-        opti.subject_to(s[:, 0] == p)
-
-        # Set using true states
-        opti.set_value(p, [waypoints[1][0],waypoints[1][1],waypoints[1][2], vx_des, vy_des])
-
-        opti.subject_to( opti.bounded(0, u[0, :], 1) )
-        opti.subject_to(opti.bounded(-1.22, u[1, :], 1.22))
-
-        # Avoid NaN error
-        opti.set_initial(s, 1)
-
-        opti.solver('ipopt')
-
-        sol = opti.solve()
-
-        print(sol.value(s), sol.value(u))
-
-        # Apply this
-        control = u[:, 0]
-
-        # Find true state
-        # New parameter value p
-
-        # Loop over
-
-        # Wait for car to stabilize after spawning
-        while self.vehicle.get_velocity().z != 0:
-            pass
-        
-
-        # Desired trajectory
-        x_des = waypoints[:,0]
-        y_des = waypoints[:,1]
-        yaw_des = [wrapToPi(np.radians(i)) for i in waypoints[:, 2]] # [radians] 
-        
-        laps_completed = 0
-
         # Prediction Horizon
-        p = 5
+        i = 0
+        while(i < 1000):
+            i += 1
+            # Set using true states
+            curr_idx = calculate_nearest_index(curr_state, waypoints, curr_idx)
+            yaw_des = waypoints[curr_idx, 2]
+            yaw = -curr_state[2]
+            R = np.array([[np.cos(yaw), -np.sin(yaw)], [np.sin(yaw), np.cos(yaw)]])
+            wp_car_frame = R @ (waypoints[max(0, curr_idx-10):curr_idx+10, :2].T - curr_state[:2].reshape(-1, 1))
+            coeff = np.polyfit(wp_car_frame[0, :], wp_car_frame[1, :], 2)
+            coeff_list = coeff.tolist()
 
-        while 1:
-            state = self.get_true_state()
+            N = 5
+            s = opti.variable(5, N + 1)
+            e = opti.variable(2, N + 1)
+            u = opti.variable(2, N)
+            p = opti.parameter(5, 1)
+
+            opti.minimize(sumsqr(e) + sumsqr(vx_des - s[3, :]) + sumsqr(u) + sumsqr(u[:, :N-1] - u[:, 1:N]))
+
+            for k in range(N):
+                opti.subject_to(e[:, k] == calculate_error(s[:, k], curr_state, coeff_list, yaw_des))
+                opti.subject_to(s[:, k+1] == pred(s[:, k], u[:, k], 0.03))
+
+            opti.subject_to(s[:, 0] == p)
+
+            # Set using true states
+            self.snapshot = self.world.wait_for_tick()
+            curr_t = self.snapshot.timestamp.elapsed_seconds # [seconds]
+            curr_state = self.get_true_state()
+            self.states.append(state(curr_t, curr_state[0], curr_state[1], curr_state[2], curr_state[3], curr_state[4], 0))
+            curr_idx = calculate_nearest_index(curr_state, waypoints, curr_idx)
+
+            opti.set_value(p, curr_state)
+            print('read true state')
+            opti.subject_to(opti.bounded(-1, u[0, :], 1))
+            opti.subject_to(opti.bounded(-1.22, u[1, :], 1.22))
+
+            opti.set_value(p, curr_state)
+            print('read true state')
+            opti.subject_to(opti.bounded(-1, u[0, :], 1))
+            opti.subject_to(opti.bounded(-1.22, u[1, :], 1.22))
+
+            # Good Initialization
+            opti.set_initial(s, np.array([curr_state, curr_state, curr_state, curr_state, curr_state, curr_state]).T)
+
+            p_opts = {"print_time": True, 'ipopt.print_level': 0}
+            opti.solver('ipopt', p_opts)
+
+            sol = opti.solve()
+
+            print("solution found")
+            cont = sol.value(u)
+
+            if cont[0, 0] > 0:
+                throttle = cont[0, 0]
+                brake = 0
+            else:
+                brake = cont[0, 0]
+                throttle = 0
+
+            steer = cont[1, 0] / 1.22
+
+            print('states', sol.value(s))
+            print('errors', sol.value(e))
+            print('controls', sol.value(u))
 
             self.snapshot = self.world.wait_for_tick()
             curr_t = self.snapshot.timestamp.elapsed_seconds # [seconds]
             
-            opti = Opti()
-            U = opti.variable(p, 2)
-
-            # Steering angle control
-            _steer = np.degrees(wrapToPi(psi_h + psi_c))  # uncontrained in degrees
-            _steer = max(min(_steer, self.max_steer_angle), -self.max_steer_angle)
-            _steer = (_steer)/self.max_steer_angle # constrained to [-1, 1]
-
-            # Split velocity control into throttle and brake and constrain them to [0, 1]
-            if acc >= 0:
-                _throttle = np.tanh(acc)
-                _brake = 0
-                if (_throttle - self.controls[-1].throttle) > 0.1:
-                    _throttle = self.controls[-1].throttle + 0.1
-            else:
-                _throttle = 0
-                _brake = np.tanh(abs(acc))
-                if (_brake - self.controls[-1].brake) > 0.1:
-                    _brake = self.controls[-1].brake + 0.1
-            
             # Append control data 
             self.controls.append(control(curr_t, _throttle, _brake, _throttle - _brake, _steer * self.max_steer_angle, laps_completed))
             
+            print('Apply control')
             # Apply control
             self.vehicle.apply_control(carla.VehicleControl(
-                throttle = _throttle, steer = _steer, reverse = False, brake = _brake))
-            
+                throttle = throttle, steer = steer, reverse = False, brake = brake))
+            for i in range(100):
+                pass
 
 def main():
     try:
@@ -327,13 +289,13 @@ def main():
         waypoints = env.read_file("../../Data/2D_waypoints.txt")
 
         # Spawn a vehicle at spawn_pose
-        spawn_pose = waypoints[0]
+        spawn_idx = 1
+        spawn_pose = waypoints[spawn_idx]
         env.spawn_vehicle_2D(spawn_pose)
 
         # Set controller tuning params
         # Default params
         num_of_laps = 1
-        kp, ki, kd, ke, kv = [0.5, 0.01, 0.15, 0.1, 5.0]
 
         # Read command line args
         argv = sys.argv[1:]
@@ -351,7 +313,7 @@ def main():
         env.controls.append(control(curr_t, 0.0, 0.0, 0.0, 0.0, 0))
 
         # Initialize control loop
-        env.mpc(waypoints, num_of_laps)
+        env.mpc(waypoints, spawn_idx, num_of_laps)
     
     finally:
         if save_flag:
