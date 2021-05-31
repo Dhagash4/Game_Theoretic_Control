@@ -14,7 +14,8 @@ import os, sys
 import numpy as np
 from casadi import *
 from numpy.lib.utils import info
-from scipy.sparse import csc_matrix
+from scipy.misc import derivative
+from scipy import interpolate as interp
 
 sys.path.append('..')
 
@@ -146,7 +147,7 @@ class CarEnv():
         """
         x = self.vehicle.get_transform().location.x
         y = self.vehicle.get_transform().location.y
-        yaw = np.radians(self.vehicle.get_transform().rotation.yaw)     # [radians]
+        yaw = wrapToPi(np.radians(self.vehicle.get_transform().rotation.yaw))     # [radians]
         vx = self.vehicle.get_velocity().x * np.cos(yaw) + self.vehicle.get_velocity().y * np.sin(yaw)
         vy = -self.vehicle.get_velocity().x * np.sin(yaw) + self.vehicle.get_velocity().y * np.cos(yaw)
 
@@ -163,40 +164,24 @@ class CarEnv():
         dy = np.array([(y_r - y) ** 2 for y in self.waypoints[fromIdx:toIdx, 1]])
         dist = dx + dy
 
-        self.nearest_wp_idx = (np.argmin(dist) + fromIdx) % self.waypoints.shape[0]
+        self.nearest_wp_idx = (np.argmin(dist) + fromIdx)# % self.waypoints.shape[0]
 
+    def calculate_error(self, state_mpc):
+        x = state_mpc[0]
+        y = state_mpc[1]
+        vx = state_mpc[3]
 
-    def err_to_tangent(self, state_mpc):
-        nearest_wp = self.waypoints[self.nearest_wp_idx]
-        m = tan(nearest_wp[2])
-        x0, y0 = nearest_wp[:2]
+        self.l = self.l + (vx * self.dt)
 
-        x_r, y_r = state_mpc[0], state_mpc[1]
+        x_ref = self.lut_x(self.l)
+        y_ref = self.lut_y(self.l)
+        yaw = self.lut_theta(self.l)
 
-        crosstrack_err = fabs((m * x_r) - y_r + y0 - (m * x0)) / sqrt(m ** 2 + 1)
-        head_err = atan2(sin(nearest_wp[2] - state_mpc[2]), cos(nearest_wp[2] - state_mpc[2]))
+        e_c = sin(yaw) * (x - x_ref) - cos(yaw) * (y - y_ref)
+        e_l = -cos(yaw) * (x - x_ref) - sin(yaw) * (y - y_ref)
 
-        return MX(vcat([crosstrack_err, head_err]))
+        return MX(vcat([e_c, e_l]))
 
-    # def calculate_error(self, curr_state, yaw_flag):
-    #     car_x, car_y, car_yaw = self.car_pose
-    #     pred_x, pred_y, pred_yaw = curr_state
-
-    #     x = cos(-car_yaw) * (pred_x - car_x) - sin(-car_yaw) * (pred_y - car_y)
-    #     y = sin(-car_yaw) * (pred_x - car_x) + cos(-car_yaw) * (pred_y - car_y)
-
-    #     coeff = yaw_flag * self.coeff_x + (1 - yaw_flag) * self.coeff_y
-    #     if 0.7853 < car_yaw < 2.3561:
-            
-    #     else:
-    #         self.coeff_x = np.polyfit(x_wp_car, y_wp_car, deg = 2)
-
-    #     # y_pred = coeff[0] * (x ** 2) + coeff[1] * x + coeff[2]
-    #     y_pred = coeff[0] * x + coeff[1]
-    #     crosstrack = y_pred - y
-
-    #     head_err = yaw_des - yaw
-    #     return MX(vcat([crosstrack, head_err]))
 
     def set_mpc_params(self, P, C, lookahead, vx_des):
         self.P = P
@@ -204,24 +189,22 @@ class CarEnv():
         self.lookahead = lookahead
         self.vx_des = vx_des
         
-    def set_opti_weights(self, w_u0, w_u1, w_e0, w_e1, w_vx):
+    def set_opti_weights(self, w_u0, w_u1, w_e0, w_e1, w_vx, w_c):
         self.w_u0 = w_u0
         self.w_u1 = w_u1
         self.w_e0 = w_e0
         self.w_e1 = w_e1
         self.w_vx = w_vx
+        self.w_c = w_c
 
     def fit_curve(self):
-        yaw = self.car_pose[2]
-        x_centre = self.waypoints[self.nearest_wp_idx - 10: self.nearest_wp_idx + 10, 0] - self.car_pose[0]
-        y_centre = self.waypoints[self.nearest_wp_idx - 10: self.nearest_wp_idx + 10, 0] - self.car_pose[1]
+        self.L = np.arange(0, 100)
+        fromIdx = max(0, self.nearest_wp_idx - 10)
+        toIdx = fromIdx + 100
 
-        x_wp_car = np.cos(-yaw) * x_centre - np.sin(-yaw) * y_centre
-        y_wp_car = np.sin(-yaw) * x_centre + np.cos(-yaw) * y_centre
-
-        self.coeff_y = np.polyfit(y_wp_car, x_wp_car, deg = 2)
-        self.coeff_x = np.polyfit(x_wp_car, y_wp_car, deg = 2)
-
+        self.lut_x = interpolant('LUT', 'bspline', [self.L], self.waypoints[fromIdx:toIdx, 0])
+        self.lut_y = interpolant('LUT', 'bspline', [self.L], self.waypoints[fromIdx:toIdx, 1])
+        self.lut_theta = interpolant('LUT', 'bspline', [self.L], self.waypoints[fromIdx:toIdx, 2])
 
     def mpc(self):
         """Deploy Stanley Control Paradigm for vehicle control
@@ -240,9 +223,7 @@ class CarEnv():
 
         prediction = vertcat(x + sqrt((vx + 0.001) ** 2 + (vy + 0.001)** 2) * cos(atan2(tan(delta), 2) + yaw) * dt,
                             y + sqrt((vx + 0.001) ** 2 + (vy + 0.001) ** 2) * sin(atan2(tan(delta), 2) + yaw) * dt,
-                            atan2(sin(yaw + (sqrt((vx + 0.001) ** 2 + (vy + 0.001) ** 2) * tan(delta) * dt / sqrt((19.8025) + (4.95 * tan(delta) ** 2)))),
-                                  cos(yaw + (sqrt((vx + 0.001) ** 2 + (vy + 0.001) ** 2) * tan(delta) * dt / sqrt((19.8025) + (4.95 * tan(delta) ** 2))))
-                                  ),
+                            yaw + (sqrt((vx + 0.001) ** 2 + (vy + 0.001) ** 2) * tan(delta) * dt / sqrt((19.8025) + (4.95 * tan(delta) ** 2))),
                             vx + ((4.22 * acc) - (-0.0013 * sqrt((vx + 0.001) ** 2 + (vy + 0.001) ** 2) * vx - 0.362 * vx)) * dt,
                             vy - (1.318 * (atan2(vy, vx+0.001) - delta) + (-0.0013 * sqrt((vx + 0.001) ** 2 + (vy + 0.001) ** 2) + 0.362) * vy) * dt)
     
@@ -251,14 +232,14 @@ class CarEnv():
         opti = Opti()
 
         s = opti.variable(5, self.P + 1)
-        e = opti.variable(2, self.P)
+        e = opti.variable(2, self.P + 1)
         u = opti.variable(2, self.C)
         p = opti.parameter(5, 1)
 
         opti.minimize(self.w_e0 * sumsqr(e[0, :]) + self.w_e1 * sumsqr(e[1, :])
                      + self.w_vx * sumsqr(self.vx_des - s[3, :])
                      + self.w_u0 * sumsqr(u[0, :]) + self.w_u1 * sumsqr(u[1, :])
-                     + sumsqr(u[:, :self.C-1] - u[:, 1:self.C])
+                     + self.w_c * sumsqr(u[:, :self.C-1] - u[:, 1:self.C])
                      )
         
         # Set using true states
@@ -271,11 +252,15 @@ class CarEnv():
 
         for i in range(self.C):
             opti.subject_to(s[:, i+1] == pred(s[:, i], u[:, i], self.dt))
-            opti.subject_to(e[:, i] == self.err_to_tangent(s[:, i]))
+            # opti.subject_to(e[:, i] == self.err_to_tangent(s[:, i]))
+            opti.subject_to(e[:, i] == self.calculate_error(s[:, i]))
 
         for k in range(self.C, self.P):
             opti.subject_to(s[:, k+1] == pred(s[:, k], u[:, self.C - 1], self.dt))
-            opti.subject_to(e[:, k] == self.err_to_tangent(s[:, k]))
+            # opti.subject_to(e[:, k] == self.err_to_tangent(s[:, k]))
+            opti.subject_to(e[:, k] == self.calculate_error(s[:, k]))
+
+        opti.subject_to(e[:, -1] == self.calculate_error(s[:, -1]))
 
         # Good Initialization
         opti.set_initial(s, np.vstack([self.car_pose] * (self.P + 1)).T)
@@ -290,9 +275,8 @@ class CarEnv():
         self.control = sol.value(u)[:, 0]
 
         # print('states: \n', sol.value(s))
-        print('errors: \n', sol.value(e))
-        print('controls: \n', sol.value(u))
-
+        print('errors: \n', sol.value(e)[:, 0])
+        print('controls: \n', sol.value(u)[:, 0])
 
 def main():
     try:
@@ -306,12 +290,15 @@ def main():
         env.waypoints = env.read_file("../../Data/2D_waypoints.txt")
 
         # Spawn a vehicle at spawn_pose
-        env.spawn_idx = 1
+        env.spawn_idx = 0
+        env.nearest_wp_idx = env.spawn_idx
         env.spawn_vehicle_2D()
 
         # Set controller tuning params
         # Default params
         num_of_laps = 1
+        prev_idx = 0
+        laps_completed = 0
 
         # Read command line args
         argv = sys.argv[1:]
@@ -323,28 +310,23 @@ def main():
                 elif tup[0] == '-s':
                     save_flag = True
 
+        print(num_of_laps)
         # Append initial state and controls
         # curr_t = env.world.wait_for_tick().timestamp.elapsed_seconds # [seconds]
         env.states.append(state(0, env.spawn_pose[0], env.spawn_pose[1], env.spawn_pose[2], 0.0, 0.0, 0))
         env.controls.append(control(0, 0.0, 0.0, 0.0, 0.0, 0))
 
         # Initialize control loop
-        env.set_mpc_params(P = 4, C = 2, lookahead = 2, vx_des = 5)
-        env.set_opti_weights(w_u0 = 1, w_u1 = 1, w_e0 = 1, w_e1 = 1, w_vx = 1)
-        
-        print(env.vehicle.get_velocity().z)
-        while env.vehicle.get_velocity().z != 0:
-            print('1', env.vehicle.get_velocity().z)
-            env.world.tick()
-            pass
+        env.set_mpc_params(P = 6, C = 4, lookahead = 5, vx_des = 7)
+        env.set_opti_weights(w_u0 = 1, w_u1 = 1, w_e0 = 10, w_e1 = 1, w_vx = 5, w_c = 2)
 
         while(1):
-            print('2')
             env.world.tick()
-            # state_read_t = env.world.wait_for_tick().timestamp.elapsed_seconds
             env.get_true_state()
             env.calculate_nearest_index()
+            env.fit_curve()
             env.dt = 0.5
+            env.l = 0.0
             env.mpc()
 
             if env.control[0] > 0:
@@ -359,8 +341,17 @@ def main():
             env.vehicle.apply_control(carla.VehicleControl(
                 throttle = throttle, steer = steer, reverse = False, brake = brake))
 
-            # control_t = env.world.wait_for_tick().timestamp.elapsed_seconds
-    
+            if (env.nearest_wp_idx == env.waypoints.shape[0] - 1) and env.nearest_wp_idx != prev_idx:
+                laps_completed += 1
+                if laps_completed == num_of_laps:
+                    while env.car_pose[3] != 0.0:
+                        env.vehicle.apply_control(carla.VehicleControl(throttle = 0, steer = 0, reverse = False, brake = 0.2))
+                        env.get_true_state()
+                        env.world.tick()
+                    break
+
+            prev_idx = env.nearest_wp_idx
+
     finally:
         if save_flag:
         # Save all Dataclass object lists to a file
