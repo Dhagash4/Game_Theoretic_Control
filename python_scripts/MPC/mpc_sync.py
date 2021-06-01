@@ -166,16 +166,18 @@ class CarEnv():
 
         self.nearest_wp_idx = (np.argmin(dist) + fromIdx)# % self.waypoints.shape[0]
 
-    def calculate_error(self, state_mpc):
+    def calculate_error(self, state_mpc, prev_state_mpc):
+        x_prev = prev_state_mpc[0]
+        y_prev = prev_state_mpc[1]
+
         x = state_mpc[0]
         y = state_mpc[1]
-        vx = state_mpc[3]
 
-        self.l = self.l + (vx * self.dt)
+        self.l = self.l + sqrt((x - x_prev + 0.00001) ** 2 + (y - y_prev + 0.00001) ** 2)
 
-        x_ref = self.lut_x(self.l)
-        y_ref = self.lut_y(self.l)
-        yaw = self.lut_theta(self.l)
+        x_ref = self.lut_x(self.l + self.lookahead)
+        y_ref = self.lut_y(self.l + self.lookahead)
+        yaw = self.lut_theta(self.l + self.lookahead)
 
         e_c = sin(yaw) * (x - x_ref) - cos(yaw) * (y - y_ref)
         e_l = -cos(yaw) * (x - x_ref) - sin(yaw) * (y - y_ref)
@@ -198,13 +200,13 @@ class CarEnv():
         self.w_c = w_c
 
     def fit_curve(self):
-        self.L = np.arange(0, 100)
-        fromIdx = max(0, self.nearest_wp_idx - 10)
-        toIdx = fromIdx + 100
+        self.L = np.arange(0, 50)
+        fromIdx = self.nearest_wp_idx
+        toIdx = fromIdx + 50
 
-        self.lut_x = interpolant('LUT', 'bspline', [self.L], self.waypoints[fromIdx:toIdx, 0])
-        self.lut_y = interpolant('LUT', 'bspline', [self.L], self.waypoints[fromIdx:toIdx, 1])
-        self.lut_theta = interpolant('LUT', 'bspline', [self.L], self.waypoints[fromIdx:toIdx, 2])
+        self.lut_x = interpolant('LUT_x', 'bspline', [self.L], self.waypoints[fromIdx:toIdx, 0], dict(degree=[3]))
+        self.lut_y = interpolant('LUT_y', 'bspline', [self.L], self.waypoints[fromIdx:toIdx, 1], dict(degree=[3]))
+        self.lut_theta = interpolant('LUT_t', 'bspline', [self.L], self.waypoints[fromIdx:toIdx, 2], dict(degree=[1]))
 
     def mpc(self):
         """Deploy Stanley Control Paradigm for vehicle control
@@ -221,11 +223,11 @@ class CarEnv():
 
         dt = MX.sym('dt')
 
-        prediction = vertcat(x + sqrt((vx + 0.001) ** 2 + (vy + 0.001)** 2) * cos(atan2(tan(delta), 2) + yaw) * dt,
-                            y + sqrt((vx + 0.001) ** 2 + (vy + 0.001) ** 2) * sin(atan2(tan(delta), 2) + yaw) * dt,
-                            yaw + (sqrt((vx + 0.001) ** 2 + (vy + 0.001) ** 2) * tan(delta) * dt / sqrt((19.8025) + (4.95 * tan(delta) ** 2))),
-                            vx + ((4.22 * acc) - (-0.0013 * sqrt((vx + 0.001) ** 2 + (vy + 0.001) ** 2) * vx - 0.362 * vx)) * dt,
-                            vy - (1.318 * (atan2(vy, vx+0.001) - delta) + (-0.0013 * sqrt((vx + 0.001) ** 2 + (vy + 0.001) ** 2) + 0.362) * vy) * dt)
+        prediction = vertcat(x + sqrt((vx + 0.00001) ** 2 + (vy + 0.00001)** 2) * cos(atan2(tan(delta), 2) + yaw) * dt,
+                            y + sqrt((vx + 0.00001) ** 2 + (vy + 0.00001) ** 2) * sin(atan2(tan(delta), 2) + yaw) * dt,
+                            yaw + (sqrt((vx + 0.00001) ** 2 + (vy + 0.00001) ** 2) * tan(delta) * dt / sqrt((19.8025) + (4.95 * tan(delta) ** 2))),
+                            vx + ((4.22 * acc) - (-0.0013 * sqrt((vx + 0.00001) ** 2 + (vy + 0.00001) ** 2) * vx - 0.362 * vx)) * dt,
+                            vy - (1.318 * (atan2(vy, vx+0.00001) - delta) + (-0.0013 * sqrt((vx + 0.00001) ** 2 + (vy + 0.00001) ** 2) + 0.362) * vy) * dt)
     
         pred = Function('pred', [s, u, dt], [prediction])
 
@@ -250,21 +252,19 @@ class CarEnv():
         opti.subject_to(opti.bounded(-1.0, u[0, :], 1.0))
         opti.subject_to(opti.bounded(-1.22, u[1, :], 1.22))
 
+        opti.subject_to(e[:, 0] == self.calculate_error(s[:, 0], s[:, 0]))
         for i in range(self.C):
             opti.subject_to(s[:, i+1] == pred(s[:, i], u[:, i], self.dt))
-            # opti.subject_to(e[:, i] == self.err_to_tangent(s[:, i]))
-            opti.subject_to(e[:, i] == self.calculate_error(s[:, i]))
-
+        for i in range(1, self.C):
+            opti.subject_to(e[:, i] == self.calculate_error(s[:, i], s[:, i - 1]))
         for k in range(self.C, self.P):
             opti.subject_to(s[:, k+1] == pred(s[:, k], u[:, self.C - 1], self.dt))
-            # opti.subject_to(e[:, k] == self.err_to_tangent(s[:, k]))
-            opti.subject_to(e[:, k] == self.calculate_error(s[:, k]))
-
-        opti.subject_to(e[:, -1] == self.calculate_error(s[:, -1]))
+            opti.subject_to(e[:, k] == self.calculate_error(s[:, k], s[:, k - 1]))
+        opti.subject_to(e[:, -1] == self.calculate_error(s[:, -1], s[:, -2]))
 
         # Good Initialization
         opti.set_initial(s, np.vstack([self.car_pose] * (self.P + 1)).T)
-        opti.set_initial(u, 0)# np.vstack([self.control] * self.C).T)
+        opti.set_initial(u, np.vstack([self.control] * self.C).T)
 
         p_opts = {"print_time": False, 'ipopt.print_level': 0}
         opti.solver('ipopt', p_opts)
@@ -317,15 +317,15 @@ def main():
         env.controls.append(control(0, 0.0, 0.0, 0.0, 0.0, 0))
 
         # Initialize control loop
-        env.set_mpc_params(P = 6, C = 4, lookahead = 5, vx_des = 7)
-        env.set_opti_weights(w_u0 = 1, w_u1 = 1, w_e0 = 10, w_e1 = 1, w_vx = 5, w_c = 2)
+        env.set_mpc_params(P = 10, C = 10, lookahead = 3, vx_des = 10)
+        env.set_opti_weights(w_u0 = 1, w_u1 = 1, w_e0 = 1, w_e1 = 1, w_vx = 5, w_c = 5)
 
+        env.dt = 0.1
         while(1):
             env.world.tick()
             env.get_true_state()
             env.calculate_nearest_index()
             env.fit_curve()
-            env.dt = 0.5
             env.l = 0.0
             env.mpc()
 
