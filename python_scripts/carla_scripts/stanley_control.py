@@ -196,7 +196,9 @@ class CarEnv():
             - waypoints: Desired trajectory for vehicle (x, y, yaw)
             - laps_required: Number of laps to be completed
         """
-        #Applying Control to the Car
+        # Wait for car to stabilize after spawning
+        while self.vehicle.get_velocity().z != 0:
+            pass
 
         # Desired velocity [m/s]
         v_des = 14.0
@@ -204,13 +206,14 @@ class CarEnv():
         # Desired trajectory
         x_des = waypoints[:,0]
         y_des = waypoints[:,1]
-        yaw_des = [wrapToPi(np.radians(i)) for i in waypoints[:, 2]] # [radians] 
+        yaw_des = [wrapToPi(i) for i in waypoints[:, 2]] # [radians] 
         
         # Initial velocity error
         err_v = v_des - np.sqrt((self.vehicle.get_velocity().x) ** 2 + (self.vehicle.get_velocity().y) ** 2)
 
         prev_idx = 0
         laps_completed = 0
+
 
         while 1:
             x = self.vehicle.get_transform().location.x
@@ -219,7 +222,6 @@ class CarEnv():
                         
             v_lon = self.vehicle.get_velocity().x * np.cos(np.radians(yaw)) + self.vehicle.get_velocity().y * np.sin(np.radians(yaw))
             v_lat = -self.vehicle.get_velocity().x * np.sin(np.radians(yaw)) + self.vehicle.get_velocity().y * np.cos(np.radians(yaw))
-            print(v_lon, v_lat)
 
             self.snapshot = self.world.wait_for_tick()
             curr_t = self.snapshot.timestamp.elapsed_seconds # [seconds]
@@ -252,10 +254,18 @@ class CarEnv():
             
             prev_idx = idx
 
+            if prev_idx == 1000:
+                print('changing speed')
+                v_des = 6
+
+            if prev_idx == 2000:
+                print('changing speed')
+                v_des = 12
+
             # Visualize waypoints
             self.world.debug.draw_string(carla.Location(waypoints[idx, 0], waypoints[idx, 1], 2), '.', draw_shadow=False,
-                                   color=carla.Color(r=255, g=0, b=0), life_time=5,
-                                   persistent_lines=True)
+                                color=carla.Color(r=255, g=0, b=0), life_time=5,
+                                persistent_lines=True)
 
             # Heading error [radians]
             psi_h = wrapToPi(yaw_des[idx] - np.radians(yaw))
@@ -306,6 +316,7 @@ def main():
 
         # Spawn a vehicle at spawn_pose
         spawn_pose = waypoints[0]
+        spawn_pose[2] = np.degrees(spawn_pose[2])
         env.spawn_vehicle_2D(spawn_pose)
 
         # Set controller tuning params
