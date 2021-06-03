@@ -11,12 +11,10 @@ import glob
 import getopt
 import pickle
 import os, sys
-import casadi
 import numpy as np
 from casadi import *
 from typing import Tuple, NoReturn
 from numpy.lib.utils import info
-from scipy import interpolate as interp
 from matplotlib import pyplot as plt
 
 sys.path.append('..')
@@ -308,16 +306,16 @@ class CarEnv():
         p_acc = self.w_u0 * sumsqr(u[0, :])                                     # Throttle/Brake cost
         p_steer = self.w_u1 * sumsqr(u[1, :])                                   # Steering cost
         p_control_roc = self.w_c * sumsqr(u[:, :self.C-1] - u[:, 1:self.C])     # Rate of Change of Controls
-        p_vel = 0.1 * sumsqr(v)
+        p_vel = 0.0 * sumsqr(v)
 
         p_v_roc = self.w_c * sumsqr(v[:self.P] - v[1:self.P + 1])               # Rate of Change of progression rate 
-        p_v_max = self.gamma * sum2(v) * Ts                                     # Progression Reward
+        r_v_max = self.gamma * sum2(v) * Ts                                     # Progression Reward
         p_contouring = self.w_qc * sumsqr(e[0, :])                              # Contouring Error
         p_lag = self.w_ql * sumsqr(e[1, :])                                     # Lag Error
         
         # Minimization objective
-        opti.minimize(p_contouring + p_lag + p_control_roc + p_v_roc + p_acc + p_steer + p_vel
-                     - p_v_max)
+        opti.minimize(p_contouring + p_lag + p_control_roc + p_v_roc + p_acc + p_steer
+                     - r_v_max)
         
         # Constraints
         opti.subject_to(s[:, 0] == self.car_state)              # Start prediction with true vehicle state
@@ -327,45 +325,45 @@ class CarEnv():
         opti.subject_to(opti.bounded(-1.22, u[1, :], 1.22))     # Bounded throttle/brake
         opti.subject_to(opti.bounded(0, t, max_L))              # Bounded path length
         opti.subject_to(opti.bounded(0, v, self.vmax))          # Bounded path progression
-
+        
         # Prediction till control horizon
         for i in range(self.C):
             if i < 0.6 * self.P:
                 dt = Ts
             else:
-                dt = Ts + 0.2
+                dt = Ts + 0
 
             opti.subject_to(s[:, i+1] == pred(s[:, i], u[:, i], dt))
             opti.subject_to(e[:, i] == self.calculate_error(s[:, i], t[i]))
-            opti.subject_to(t[i + 1] == t[i] + v[i] * Ts)
+            opti.subject_to(t[i + 1] == t[i] + v[i] * dt)
 
         # Prediction after control horizon (constant control from last step)
         for i in range(self.C, self.P):
             if i < 0.6 * self.P:
                 dt = Ts
             else:
-                dt = Ts + 0.2
+                dt = Ts + 0
 
             opti.subject_to(s[:, i+1] == pred(s[:, i], u[:, self.C - 1], dt))
             opti.subject_to(e[:, i] == self.calculate_error(s[:, i], t[i]))
-            opti.subject_to(t[i + 1] == t[i] + v[i] * Ts)
+            opti.subject_to(t[i + 1] == t[i] + v[i] * dt)
 
         opti.subject_to(e[:, -1] == self.calculate_error(s[:, -1], t[-1]))
 
         # Variable Initializations
         predicted_last_state = self.predict_new(prev_states[:, -1], prev_controls[:, -1], system_params, dt)
-        opti.set_initial(s, np.vstack((prev_states[:, 1:].T, predicted_last_state)).T)
+        opti.set_initial(s, np.vstack((self.car_state, prev_states[:, 2:].T, predicted_last_state)).T)
         opti.set_initial(u, np.vstack((prev_controls[:, 1:].T, prev_controls[:, -1])).T)
         opti.set_initial(t, np.hstack((prev_t[1:], prev_t[-1] + prev_v[-1] * dt)))
         opti.set_initial(v, np.hstack((prev_v[1:], prev_v[-1])))
         opti.set_initial(e, 0)
 
         # opti.set_initial(s, np.vstack([self.car_state] * (self.P + 1)).T)
-        # opti.set_initial(u, np.vstack([self.control] * self.C).T)
-        # opti.set_initial(t, self.nearest_wp_idx)
+        # opti.set_initial(u, np.vstack([prev_controls[:, 0]] * self.C).T)
+        # opti.set_initial(t, self.nearest_wp_idx + np.arange(0, self.P + 1))
         # opti.set_initial(v, self.car_state[3])
 
-        p_opts = {"print_time": False, 'ipopt.print_level': 0}
+        p_opts = {"print_time": False, 'ipopt.print_level': 0, "ipopt.expect_infeasible_problem": "yes", "ipopt.max_iter": 100}
         opti.solver('ipopt', p_opts)
 
         sol = opti.solve()
@@ -378,14 +376,14 @@ class CarEnv():
         opti_v = sol.value(v)
 
         # Plot predicted states
-        plt.plot(opti_states[0, :], opti_states[1, :])
-        plt.pause(0.1)
+        # plt.plot(opti_states[0, :], opti_states[1, :])
+        # plt.pause(0.1)
 
         # print('Predicted states: \n {} \n'.format(opti_states))
         # print('Contouring and Lag errors: \n {} \n'.format(opti_errors))
         # print('Optimized Controls: \n {} \n'.format(opti_controls))
-        print('Predicted parameter: \n {} \n'.format(opti_t))
-        print('Path progression: \n {} \n'.format(opti_v))
+        # print('Predicted parameter: \n {} \n'.format(opti_t))
+        # print('Path progression: \n {} \n'.format(opti_v))
 
         return opti_states, opti_controls, opti_t, opti_v
 
@@ -405,7 +403,7 @@ def main():
         spawn_idx = 0
         env.nearest_wp_idx = spawn_idx
         env.car_state = env.spawn_vehicle_2D(spawn_idx, waypoints)
-        for i in range(100):
+        for i in range(50):
             env.world.tick()
 
         # Default params
@@ -431,8 +429,8 @@ def main():
         env.lut_x, env.lut_y, env.lut_theta = env.fit_curve(waypoints)
 
         # Set controller tuning params
-        env.set_mpc_params(P = 15, C = 15, vmax = 55)
-        env.set_opti_weights(w_u0 = 1, w_u1 = 1, w_qc = 1, w_ql = 5, gamma = 5, w_c = 5)
+        env.set_mpc_params(P = 25, C = 25, vmax = 25)
+        env.set_opti_weights(w_u0 = 1, w_u1 = 1, w_qc = 0.75, w_ql = 2, gamma = 10, w_c = 2)
         Ts = 0.1
 
         prev_states = np.vstack([env.car_state] * (env.P + 1)).T
@@ -444,9 +442,13 @@ def main():
         while(1):
             env.world.tick()
             env.car_state = env.get_true_state()
+            print(env.car_state[3])
             env.nearest_wp_idx = env.calculate_nearest_index(env.car_state, waypoints)
-            prev_states, prev_controls, prev_t, prev_v = env.mpc(prev_states, prev_controls, prev_t, prev_v, system_params, waypoints.shape[0] + 1, Ts)
-
+            try:
+                prev_states, prev_controls, prev_t, prev_v = env.mpc(prev_states, prev_controls, prev_t, prev_v, system_params, waypoints.shape[0] + 1, Ts)
+            except RuntimeError as err:
+                print('Error occured with following error message: \n {} \n'.format(err))
+                pass
             if prev_controls[0, 0] > 0:
                 throttle = prev_controls[0, 0]
                 brake = 0
