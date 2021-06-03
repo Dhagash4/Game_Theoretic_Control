@@ -20,7 +20,7 @@ x_des = data[:, 0]
 y_des = data[:, 1]
 
 # Read ground truth states
-filename = 'states.pickle'
+filename = '../../Data/states_mpc.pickle'
 with open(filename, 'rb') as f:
     data = pickle.load(f)
 
