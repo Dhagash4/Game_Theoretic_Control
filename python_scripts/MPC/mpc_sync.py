@@ -14,8 +14,8 @@ import os, sys
 import numpy as np
 from casadi import *
 from numpy.lib.utils import info
-from scipy.misc import derivative
 from scipy import interpolate as interp
+from matplotlib import pyplot as plt
 
 sys.path.append('..')
 
@@ -157,14 +157,14 @@ class CarEnv():
     def calculate_nearest_index(self):
         # Search nearest waypoint index
         x_r, y_r = self.car_pose[:2]
-        fromIdx = max(0, self.nearest_wp_idx - 10)
-        toIdx = self.nearest_wp_idx + 10
+        # fromIdx = max(0, self.nearest_wp_idx - 10)
+        # toIdx = self.nearest_wp_idx + 10
 
-        dx = np.array([(x_r - x) ** 2 for x in self.waypoints[fromIdx:toIdx, 0]])
-        dy = np.array([(y_r - y) ** 2 for y in self.waypoints[fromIdx:toIdx, 1]])
+        dx = np.array([(x_r - x) ** 2 for x in self.waypoints[:, 0]])
+        dy = np.array([(y_r - y) ** 2 for y in self.waypoints[:, 1]])
         dist = dx + dy
 
-        self.nearest_wp_idx = (np.argmin(dist) + fromIdx)# % self.waypoints.shape[0]
+        self.nearest_wp_idx = np.argmin(dist)# + fromIdx)# % self.waypoints.shape[0]
 
     def calculate_error(self, state_mpc, theta):
         x = state_mpc[0]
@@ -177,8 +177,7 @@ class CarEnv():
         e_c = sin(yaw) * (x - x_ref) - cos(yaw) * (y - y_ref)
         e_l = -cos(yaw) * (x - x_ref) - sin(yaw) * (y - y_ref)
 
-        return MX(vcat([e_c, e_l]))
-
+        return MX(vcat([e_c**2, e_l**2]))
 
     def set_mpc_params(self, P, C, vmax):
         self.P = P
@@ -208,6 +207,9 @@ class CarEnv():
             - waypoints: Desired trajectory for vehicle (x, y, yaw)
             - laps_required: Number of laps to be completed
         """
+        err = [0, 0]
+        pose = []
+        
         s = MX.sym('s', 5)
         x, y, yaw, vx, vy = s[0], s[1], s[2], s[3], s[4]
 
@@ -227,19 +229,23 @@ class CarEnv():
         opti = Opti()
 
         s = opti.variable(5, self.P + 1)
+        # e = opti.variable(2, 1)
         e = opti.variable(2, self.P + 1)
         t = opti.variable(1, self.P + 1)
         v = opti.variable(1, self.P + 1)
         u = opti.variable(2, self.C)
         p = opti.parameter(5, 1)
 
-        opti.minimize(self.w_qc * sumsqr(e[0, :]) + self.w_ql * sumsqr(e[1, :])
-                     - self.gamma * sumsqr(v) * Ts
-                     + self.w_u0 * sumsqr(u[0, :]) + self.w_u1 * sumsqr(u[1, :])
+        opti.minimize(0 # self.w_qc * e[0] + self.w_ql * e[1]
+                     + self.w_qc * sumsqr(e[0, :]) + self.w_ql * sumsqr(e[1, :])
+                     - self.gamma * sum2(v) * Ts
+                    #  + self.w_u0 * sumsqr(u[0, :]) + self.w_u1 * sumsqr(u[1, :])
                      + self.w_c * sumsqr(u[:, :self.C-1] - u[:, 1:self.C])
+                     + self.w_c * sumsqr(v[:self.P] - v[1:self.P + 1])
                      )
         
         # Set using true states
+        # pose.append(self.car_pose)
         opti.set_value(p, self.car_pose)
         opti.subject_to(s[:, 0] == p)
         opti.subject_to(t[0] == self.theta)
@@ -251,32 +257,57 @@ class CarEnv():
         opti.subject_to(opti.bounded(0, v, self.vmax))
 
         for i in range(self.C):
+            if i < 0.6 * self.P:
+                self.dt = 0.1
+            else:
+                self.dt = 0.1
+
+            # err += self.calculate_error(pose[-1], t[i])
+            # pose.append(pred(pose[-1], u[:, i], self.dt))
             opti.subject_to(s[:, i+1] == pred(s[:, i], u[:, i], self.dt))
+            # err += self.calculate_error(s[:, i], t[i])
             opti.subject_to(e[:, i] == self.calculate_error(s[:, i], t[i]))
             opti.subject_to(t[i + 1] == t[i] + v[i] * Ts)
 
-        for k in range(self.C, self.P):
-            opti.subject_to(s[:, k+1] == pred(s[:, k], u[:, self.C - 1], self.dt))
-            opti.subject_to(e[:, k] == self.calculate_error(s[:, k], t[k]))
-            opti.subject_to(t[k + 1] == t[k] + v[k] * Ts)
+        for i in range(self.C, self.P):
+            if i < 0.6 * self.P:
+                self.dt = 0.1
+            else:
+                self.dt = 0.1
+
+            # err += self.calculate_error(pose[-1], t[i])
+            # pose.append(pred(pose[-1], u[:, self.C - 1], self.dt))
+            opti.subject_to(s[:, i+1] == pred(s[:, i], u[:, self.C - 1], self.dt))
+            # err += self.calculate_error(s[:, i], t[i])
+            opti.subject_to(e[:, i] == self.calculate_error(s[:, i], t[i]))
+            opti.subject_to(t[i + 1] == t[i] + v[i] * Ts)
 
         opti.subject_to(e[:, -1] == self.calculate_error(s[:, -1], t[-1]))
+        # err += self.calculate_error(pose[-1], t[-1])
+        # err += self.calculate_error(s[:, -1], t[-1])
+        # opti.subject_to(e == err)
 
         # Good Initialization
         opti.set_initial(s, np.vstack([self.car_pose] * (self.P + 1)).T)
         opti.set_initial(u, np.vstack([self.control] * self.C).T)
+        opti.set_initial(t, self.nearest_wp_idx)
+        opti.set_initial(v, self.car_pose[3])
+        # opti.set_initial(e, 0)
 
         p_opts = {"print_time": False, 'ipopt.print_level': 0}
         opti.solver('ipopt', p_opts)
 
         sol = opti.solve()
 
+        plt.plot(sol.value(s)[0, :], sol.value(s)[1, :])
+        plt.pause(0.1)
         # print("solution found")
         self.control = sol.value(u)[:, 0]
         self.theta = sol.value(t)[1]
+        # self.theta = self.nearest_wp_idx
 
         # print('states: \n', sol.value(s))
-        print('errors: \n', sol.value(e)[:, 0])
+        print('errors: \n', sol.value(e))
         print('controls: \n', sol.value(u)[:, 0])
 
 def main():
@@ -311,23 +342,23 @@ def main():
                 elif tup[0] == '-s':
                     save_flag = True
 
-        print(num_of_laps)
         # Append initial state and controls
         # curr_t = env.world.wait_for_tick().timestamp.elapsed_seconds # [seconds]
         env.states.append(state(0, env.spawn_pose[0], env.spawn_pose[1], env.spawn_pose[2], 0.0, 0.0, 0))
         env.controls.append(control(0, 0.0, 0.0, 0.0, 0.0, 0))
 
         # Initialize control loop
-        env.set_mpc_params(P = 10, C = 10, vmax = 10)
-        env.set_opti_weights(w_u0 = 1, w_u1 = 1, w_qc = 1, w_ql = 1, gamma = 1, w_c = 5)
+        env.set_mpc_params(P = 25, C = 25, vmax = 55)
+        env.set_opti_weights(w_u0 = 1, w_u1 = 1, w_qc = 1, w_ql = 5, gamma = 5, w_c = 5)
 
         env.fit_curve()
         env.dt = 0.1
         while(1):
             env.world.tick()
             env.get_true_state()
+            # print(env.car_pose[3])
             env.calculate_nearest_index()
-            env.mpc(0.1)
+            env.mpc(env.dt)
 
             if env.control[0] > 0:
                 throttle = env.control[0]
@@ -337,6 +368,9 @@ def main():
                 throttle = 0
 
             steer = env.control[1] / 1.22
+
+            # env.states.append(state(0, env.car_pose[0], env.car_pose[1], env.car_pose[2], env.car_pose[3], env.car_pose[4], 0))
+            # env.controls.append(control(0, throttle, brake, env.control[0], steer, 0))
 
             env.vehicle.apply_control(carla.VehicleControl(
                 throttle = throttle, steer = steer, reverse = False, brake = brake))
