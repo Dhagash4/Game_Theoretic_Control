@@ -32,6 +32,8 @@ except IndexError:
 
 import carla
 
+PI_2 = np.pi * 2
+
 class CarEnv():
 
     def __init__(self) -> NoReturn:
@@ -107,6 +109,23 @@ class CarEnv():
         return spawn_state
 
 
+    def CameraSensor(self):
+        #RGB Sensor 
+
+        self.rgb_cam = self.world.get_blueprint_library().find('sensor.camera.rgb')
+        self.rgb_cam.set_attribute('image_size_x','640')
+        self.rgb_cam.set_attribute('image_size_y', '480')
+        self.rgb_cam.set_attribute('fov', '110')
+        
+
+        #Attaching sensor to car
+
+        transform = carla.Transform(carla.Location(x=-4.8,y=0.0, z=7.3), carla.Rotation(pitch = -30))
+        self.cam_sensor = self.world.spawn_actor(self.rgb_cam, transform, attach_to=self.vehicle)
+        self.actor_list.append(self.cam_sensor)
+        self.cam_sensor.listen(lambda image: image.save_to_disk('/home/dhagash/MS-GE-02/MSR-Project/stanley_different_params/img%06d.png' % image.frame))
+
+
     def read_file(self, path: str, delimiter: str = ' ') -> (np.ndarray):
         """ Read data from a file
 
@@ -147,7 +166,7 @@ class CarEnv():
             actor.destroy()
 
 
-    def get_true_state(self) -> (np.ndarray):
+    def get_true_state(self, orient_flag) -> (np.ndarray):
         """Get vehicles true state from the simulation
         
         Returns
@@ -156,7 +175,10 @@ class CarEnv():
         """
         x = self.vehicle.get_transform().location.x
         y = self.vehicle.get_transform().location.y
-        yaw = wrapToPi(np.radians(self.vehicle.get_transform().rotation.yaw))     # [radians]
+        if orient_flag:
+            yaw = ((np.radians(self.vehicle.get_transform().rotation.yaw)) + PI_2) % PI_2    # [radians]
+        else:
+            yaw = wrapToPi(np.radians(self.vehicle.get_transform().rotation.yaw))    # [radians]
         vx = self.vehicle.get_velocity().x * np.cos(yaw) + self.vehicle.get_velocity().y * np.sin(yaw)
         vy = -self.vehicle.get_velocity().x * np.sin(yaw) + self.vehicle.get_velocity().y * np.cos(yaw)
 
@@ -164,7 +186,7 @@ class CarEnv():
 
         return true_state
 
-    def predict_new(self, old_state, control, params, dt):
+    def predict_new(self, orient_flag, old_state: np.ndarray, control: np.ndarray, params: np.ndarray, dt: float) -> (np.ndarray):
         L, p, Cd, Cf, Cc = params
 
         x, y, theta, vx, vy = old_state
@@ -174,9 +196,12 @@ class CarEnv():
 
         x_new = x + (v * np.cos(np.arctan2(np.tan(delta), 2) + theta) * dt)
         y_new = y + (v * np.sin(np.arctan2(np.tan(delta), 2) + theta) * dt)
-        theta_new = wrapToPi(theta + (v * np.tan(delta) * dt / np.sqrt((L ** 2) + ((0.5 * L * np.tan(delta)) ** 2))))
+        if orient_flag:
+            theta_new = ((theta + (v * np.tan(delta) * dt / np.sqrt((L ** 2) + ((0.5 * L * np.tan(delta)) ** 2)))) + PI_2) % PI_2
+        else:
+            theta_new = wrapToPi(theta + (v * np.tan(delta) * dt / np.sqrt((L ** 2) + ((0.5 * L * np.tan(delta)) ** 2))))
         vx_new = vx + (p * acc - Cd * v * vx - Cf * vx) * dt
-        vy_new = vy - (Cc * wrapToPi(np.arctan2(vy, vx) - delta) + (Cd * v + Cf) * vy) * dt
+        vy_new = vy - (Cc * (np.arctan2(vy, vx) - delta) + (Cd * v + Cf) * vy) * dt
 
         new_state = np.array([x_new, y_new, theta_new, vx_new, vy_new])
 
@@ -205,7 +230,7 @@ class CarEnv():
 
         return idx
 
-    def calculate_error(self, state_mpc: MX, theta: MX) -> (MX):
+    def calculate_error(self, state_mpc: MX, theta: MX, max_L: float) -> (MX):
         """Compute Contouring and Lag errors at given prediction step for the Model Predictive Contour Controller
 
         Arguments
@@ -219,6 +244,8 @@ class CarEnv():
         """
         x = state_mpc[0]
         y = state_mpc[1]
+
+        # theta = fmod(theta, max_L)
 
         x_ref = self.lut_x(theta)
         y_ref = self.lut_y(theta)
@@ -244,8 +271,18 @@ class CarEnv():
         self.gamma = gamma
         self.w_c = w_c
 
+    def form_w_qc(self,init_value,step_size):
+        I = np.eye(self.P+1)
+        w = I
+        for i in range(self.P+1):
+
+            w[i,i] = init_value + step_size * i
+        
+        return w
+
     def fit_curve(self, waypoints: np.ndarray) -> Tuple[Function, Function, Function]:
         """Fit a spline to the waypoints parametrized by the path length
+
         Arguments
         ---------
         - waypoints: pre-computed waypoints to fit a parametric spline to
@@ -256,25 +293,62 @@ class CarEnv():
         - lut_y: Look up table for the y coordinate
         - lut_theta: Look up table for the path orientation
         """
-        L = np.arange(0, waypoints.shape[0])
+        waypoints_ext = np.vstack((waypoints, waypoints[:50, :]))
+        L = np.arange(0, waypoints_ext.shape[0])
 
-        self.lut_x = interpolant('LUT_x', 'bspline', [L], waypoints[:, 0], dict(degree=[3]))
-        self.lut_y = interpolant('LUT_y', 'bspline', [L], waypoints[:, 1], dict(degree=[3]))
-        self.lut_theta = interpolant('LUT_t', 'bspline', [L], waypoints[:, 2], dict(degree=[1]))
+        self.lut_x = interpolant('LUT_x', 'bspline', [L], waypoints_ext[:, 0], dict(degree=[3]))
+        self.lut_y = interpolant('LUT_y', 'bspline', [L], waypoints_ext[:, 1], dict(degree=[3]))
+        self.lut_theta = interpolant('LUT_t', 'bspline', [L], waypoints_ext[:, 2], dict(degree=[1]))
 
         return self.lut_x, self.lut_y, self.lut_theta
 
-    def mpc(self, prev_states, prev_controls, prev_t, prev_v, system_params: np.ndarray, max_L: float, Ts: float):
+    def track_constraints(self, state_mpc: MX, theta: MX) -> (MX): 
+
+        x = state_mpc[0]
+        y = state_mpc[1]
+
+        x_ref = self.lut_x(theta)
+        y_ref = self.lut_y(theta)
+        yaw = self.lut_theta(theta)
+        
+        track_width = 5.0           # [m]
+        d = (track_width * 0.8)/2
+        
+        a = -tan(yaw)
+        b = 1
+        c = (tan(yaw) * x_ref) - y_ref
+
+        c1 = c - (d * sqrt(1 + (tan(yaw) ** 2)))
+        c2 = c + (d * sqrt(1 + (tan(yaw) ** 2)))
+
+        u_b = a * x  + b * y + c1
+        l_b = a * x  + b * y + c2 
+
+        bounds = MX(vcat([u_b,l_b]))
+        
+        return bounds
+
+    def mpc(self, orient_flag, prev_states, prev_controls, prev_t, prev_v, system_params: np.ndarray, max_L: float, Ts: float):
         """Model Predictive Controller Function
 
         Arguments
         ---------
+        - prev_states: vehicle state predictions from the previous iteration [5 x P+1]
+        - prev_controls: controls computed in the previous iteration [2 x P]
+        - prev_t: path length parameter from the previous iteration [1 x P+1]
+        - prev_v: path progression parameter from the previous iteration [1 x P+1]
         - system_params: Vehicle dynamics parameters obtained from System ID
         - max_L: maximum path length of the track
         - Ts: Sampling Time of the controller
+
+        Returns
+        -------
+        - opti_states: vehicle state predictions from the current iteration [5 x P+1]
+        - opti_controls: optimal controls computed in this iteration [2 x P]
+        - opti_t: path length parameter from this iteration [1 x P+1]
+        - opti_v: path progression parameter from the current iteration [1 x P+1]
         """        
         ##### Define state dynamics in terms of casadi function #####
-
         L, p, Cd, Cf, Cc = system_params
         d_nan = 1e-5 # Add small number to avoid NaN error at zero velocities in the Jacobian evaluation
 
@@ -285,12 +359,19 @@ class CarEnv():
         x, y, yaw, vx, vy = state[0], state[1], state[2], state[3], state[4]
         acc, delta = [control_command[0], control_command[1]]
 
-        state_prediction = vertcat(x + sqrt((vx + d_nan) ** 2 + (vy + d_nan)** 2) * cos(atan2(tan(delta), 2) + yaw) * dt,
-                            y + sqrt((vx + d_nan) ** 2 + (vy + d_nan) ** 2) * sin(atan2(tan(delta), 2) + yaw) * dt,
-                            yaw + (sqrt((vx + d_nan) ** 2 + (vy + d_nan) ** 2) * tan(delta) * dt / sqrt((L ** 2) + (0.5 * L * tan(delta)) ** 2)),
-                            vx + ((p * acc) - (Cd * sqrt((vx + d_nan) ** 2 + (vy + d_nan) ** 2) * vx - Cf * vx)) * dt,
-                            vy - (Cc * (atan2(vy, vx + d_nan) - delta) + (Cd * sqrt((vx + d_nan) ** 2 + (vy + d_nan) ** 2) + Cf) * vy) * dt)
-    
+        if orient_flag:
+            state_prediction = vertcat(x + sqrt((vx + d_nan) ** 2 + (vy + d_nan)** 2) * cos(atan2(tan(delta), 2) + yaw) * dt,
+                                y + sqrt((vx + d_nan) ** 2 + (vy + d_nan) ** 2) * sin(atan2(tan(delta), 2) + yaw) * dt,
+                                fmod(((yaw + (sqrt((vx + d_nan) ** 2 + (vy + d_nan) ** 2) * tan(delta) * dt / sqrt((L ** 2) + (0.5 * L * tan(delta)) ** 2))) + PI_2), PI_2),
+                                vx + ((p * acc) - (Cd * sqrt((vx + d_nan) ** 2 + (vy + d_nan) ** 2) * vx - Cf * vx)) * dt,
+                                vy - (Cc * (atan2(vy, vx + d_nan) - delta) + (Cd * sqrt((vx + d_nan) ** 2 + (vy + d_nan) ** 2) + Cf) * vy) * dt)
+        else:
+            state_prediction = vertcat(x + sqrt((vx + d_nan) ** 2 + (vy + d_nan)** 2) * cos(atan2(tan(delta), 2) + yaw) * dt,
+                                y + sqrt((vx + d_nan) ** 2 + (vy + d_nan) ** 2) * sin(atan2(tan(delta), 2) + yaw) * dt,
+                                (yaw + (sqrt((vx + d_nan) ** 2 + (vy + d_nan) ** 2) * tan(delta) * dt / sqrt((L ** 2) + (0.5 * L * tan(delta)) ** 2))),
+                                vx + ((p * acc) - (Cd * sqrt((vx + d_nan) ** 2 + (vy + d_nan) ** 2) * vx - Cf * vx)) * dt,
+                                vy - (Cc * (atan2(vy, vx + d_nan) - delta) + (Cd * sqrt((vx + d_nan) ** 2 + (vy + d_nan) ** 2) + Cf) * vy) * dt)
+
         pred = Function('pred', [state, control_command, dt], [state_prediction])
 
         ##### Optistack begin #####
@@ -306,15 +387,14 @@ class CarEnv():
         p_acc = self.w_u0 * sumsqr(u[0, :])                                     # Throttle/Brake cost
         p_steer = self.w_u1 * sumsqr(u[1, :])                                   # Steering cost
         p_control_roc = self.w_c * sumsqr(u[:, :self.C-1] - u[:, 1:self.C])     # Rate of Change of Controls
-        p_vel = 0.0 * sumsqr(v)
 
         p_v_roc = self.w_c * sumsqr(v[:self.P] - v[1:self.P + 1])               # Rate of Change of progression rate 
         r_v_max = self.gamma * sum2(v) * Ts                                     # Progression Reward
-        p_contouring = self.w_qc * sumsqr(e[0, :])                              # Contouring Error
-        p_lag = self.w_ql * sumsqr(e[1, :])                                     # Lag Error
-        
+        p_contouring = e[0, :] @ self.w_qc @ e[0, :].T                          # Contouring Error
+        # p_lag = e[1, :] @ self.w_qc @ e[1, :].T                                 # Lag Error
+        p_lag = self.w_ql * sumsqr(e[1, :])
         # Minimization objective
-        opti.minimize(p_contouring + p_lag + p_control_roc + p_v_roc + p_acc + p_steer
+        opti.minimize(p_lag + p_control_roc + p_v_roc + p_acc + p_steer
                      - r_v_max)
         
         # Constraints
@@ -323,7 +403,7 @@ class CarEnv():
 
         opti.subject_to(opti.bounded(-1.0, u[0, :], 1.0))       # Bounded steering
         opti.subject_to(opti.bounded(-1.22, u[1, :], 1.22))     # Bounded throttle/brake
-        opti.subject_to(opti.bounded(0, t, max_L))              # Bounded path length
+        opti.subject_to(opti.bounded(0, t, max_L + 50))              # Bounded path length
         opti.subject_to(opti.bounded(0, v, self.vmax))          # Bounded path progression
         
         # Prediction till control horizon
@@ -334,7 +414,9 @@ class CarEnv():
                 dt = Ts + 0
 
             opti.subject_to(s[:, i+1] == pred(s[:, i], u[:, i], dt))
-            opti.subject_to(e[:, i] == self.calculate_error(s[:, i], t[i]))
+            opti.subject_to(self.track_constraints(s[:, i + 1], t[i + 1])[0] < 0)
+            opti.subject_to(self.track_constraints(s[:, i + 1], t[i + 1])[1] > 0)
+            opti.subject_to(e[:, i] == self.calculate_error(s[:, i], t[i], max_L))
             opti.subject_to(t[i + 1] == t[i] + v[i] * dt)
 
         # Prediction after control horizon (constant control from last step)
@@ -345,29 +427,30 @@ class CarEnv():
                 dt = Ts + 0
 
             opti.subject_to(s[:, i+1] == pred(s[:, i], u[:, self.C - 1], dt))
-            opti.subject_to(e[:, i] == self.calculate_error(s[:, i], t[i]))
+            opti.subject_to(self.track_constraints(s[:, i + 1], t[i + 1])[0] < 0)
+            opti.subject_to(self.track_constraints(s[:, i + 1], t[i + 1])[1] > 0)
+            opti.subject_to(e[:, i] == self.calculate_error(s[:, i], t[i], max_L))
             opti.subject_to(t[i + 1] == t[i] + v[i] * dt)
 
-        opti.subject_to(e[:, -1] == self.calculate_error(s[:, -1], t[-1]))
+        opti.subject_to(e[:, -1] == self.calculate_error(s[:, -1], t[-1], max_L))
 
         # Variable Initializations
-        predicted_last_state = self.predict_new(prev_states[:, -1], prev_controls[:, -1], system_params, dt)
-        opti.set_initial(s, np.vstack((self.car_state, prev_states[:, 2:].T, predicted_last_state)).T)
+        if orient_flag:
+            opti.set_initial(s, np.vstack([self.car_state] * (self.P + 1)).T)
+        else:
+            predicted_last_state = self.predict_new(orient_flag, prev_states[:, -1], prev_controls[:, -1], system_params, dt)
+            opti.set_initial(s, np.vstack((self.car_state, prev_states[:, 2:].T, predicted_last_state)).T)
         opti.set_initial(u, np.vstack((prev_controls[:, 1:].T, prev_controls[:, -1])).T)
+        # opti.set_initial(t, np.vstack((fmod(prev_t[1:], max_L), fmod(prev_t[-1] + prev_v[-1] * dt, max_L))).reshape(1, -1))
         opti.set_initial(t, np.hstack((prev_t[1:], prev_t[-1] + prev_v[-1] * dt)))
         opti.set_initial(v, np.hstack((prev_v[1:], prev_v[-1])))
         opti.set_initial(e, 0)
 
-        # opti.set_initial(s, np.vstack([self.car_state] * (self.P + 1)).T)
-        # opti.set_initial(u, np.vstack([prev_controls[:, 0]] * self.C).T)
-        # opti.set_initial(t, self.nearest_wp_idx + np.arange(0, self.P + 1))
-        # opti.set_initial(v, self.car_state[3])
-
+        # Set ipopt options
         p_opts = {"print_time": False, 'ipopt.print_level': 0, "ipopt.expect_infeasible_problem": "yes", "ipopt.max_iter": 100}
         opti.solver('ipopt', p_opts)
 
         sol = opti.solve()
-
 
         opti_states = sol.value(s)
         opti_controls = sol.value(u)
@@ -376,10 +459,10 @@ class CarEnv():
         opti_v = sol.value(v)
 
         # Plot predicted states
-        # plt.plot(opti_states[0, :], opti_states[1, :])
+        # plt.plot(opti_states[1, :], opti_states[0, :])
         # plt.pause(0.1)
 
-        # print('Predicted states: \n {} \n'.format(opti_states))
+        # print('Predicted states: \n {} \n'.format(opti_states[2, :]))
         # print('Contouring and Lag errors: \n {} \n'.format(opti_errors))
         # print('Optimized Controls: \n {} \n'.format(opti_controls))
         # print('Predicted parameter: \n {} \n'.format(opti_t))
@@ -429,25 +512,34 @@ def main():
         env.lut_x, env.lut_y, env.lut_theta = env.fit_curve(waypoints)
 
         # Set controller tuning params
-        env.set_mpc_params(P = 25, C = 25, vmax = 25)
-        env.set_opti_weights(w_u0 = 1, w_u1 = 1, w_qc = 0.75, w_ql = 2, gamma = 10, w_c = 2)
+        step_size = 0.1
+        init_value = 0.15
+        env.set_mpc_params(P = 15, C = 15, vmax = 25)
+        env.set_opti_weights(w_u0 = 1, w_u1 = 1, w_qc = env.form_w_qc(init_value,step_size), w_ql = 3, gamma = 10, w_c = 5)
         Ts = 0.1
 
         prev_states = np.vstack([env.car_state] * (env.P + 1)).T
         prev_controls = np.zeros((2, env.C))
+        prev_controls[0, :] = prev_controls[0, :] + 0.5
         prev_t = np.ones(env.P + 1) * env.nearest_wp_idx
         prev_v = np.zeros(env.P + 1)
 
         # Initialize control loop
         while(1):
+            if (1500 > env.nearest_wp_idx > 1250):
+                orient_flag = True
+            else:
+                orient_flag = False
+
             env.world.tick()
-            env.car_state = env.get_true_state()
+            env.car_state = env.get_true_state(orient_flag)
             print(env.car_state[3])
+            # env.cam_sensor.listen(lambda image: image.save_to_disk('/home/dhagash/MS-GE-02/MSR-Project/camera_pos_fix/%06d.png' % image.frame))
             env.nearest_wp_idx = env.calculate_nearest_index(env.car_state, waypoints)
             try:
-                prev_states, prev_controls, prev_t, prev_v = env.mpc(prev_states, prev_controls, prev_t, prev_v, system_params, waypoints.shape[0] + 1, Ts)
+                prev_states, prev_controls, prev_t, prev_v = env.mpc(orient_flag, prev_states, prev_controls, prev_t, prev_v, system_params, waypoints.shape[0] + 1, Ts)
             except RuntimeError as err:
-                print('Error occured with following error message: \n {} \n'.format(err))
+                # print('Error occured with following error message: \n {} \n'.format(err))
                 pass
             if prev_controls[0, 0] > 0:
                 throttle = prev_controls[0, 0]
@@ -466,15 +558,15 @@ def main():
 
             if (env.nearest_wp_idx == waypoints.shape[0] - 1) and env.nearest_wp_idx != prev_idx:
                 laps_completed += 1
+                prev_t = prev_t - prev_t[0]
                 if laps_completed == num_of_laps:
                     while env.car_state[3] != 0.0:
+                        print('in while loop')
                         env.vehicle.apply_control(carla.VehicleControl(throttle = 0, steer = 0, reverse = False, brake = 0.2))
-                        env.car_state = env.get_true_state()
+                        env.car_state = env.get_true_state(orient_flag)
                         env.world.tick()
                     break
-
             prev_idx = env.nearest_wp_idx
-
     finally:
         if save_flag:
         # Save all Dataclass object lists to a file
@@ -483,7 +575,6 @@ def main():
 
         # Destroy all actors in the simulation
         env.destroy()
-
 
 if __name__=="__main__":
     main()
