@@ -76,6 +76,8 @@ def main():
         
         # Stack x, y and yaw[degrees] in a single matrix and save it as ASCII file
         waypoints = np.vstack((x, y, yaw))
+        waypoints[2, 1302:1361] = waypoints[2, 1302:1361] - 2 * np.pi
+        waypoints[2, 1441:] = waypoints[2, 1441:] - 2 * np.pi
         np.savetxt('../../Data/2D_waypoints.txt', waypoints.T)
         print('2D waypoints saved in \'2D_waypoints.txt\'')
 
