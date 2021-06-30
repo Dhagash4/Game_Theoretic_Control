@@ -270,11 +270,8 @@ class CarEnv():
 
     def w_matrix(self,init_value,step_size):
         w = np.eye(self.P + 1)
-        
         for i in range(self.P + 1):
-
             w[i, i] = init_value + step_size * i
-        
         return w
 
     def fit_curve(self, waypoints: np.ndarray) -> Tuple[Function, Function, Function]:
@@ -290,33 +287,29 @@ class CarEnv():
         - lut_y: Look up table for the y coordinate
         - lut_theta: Look up table for the path orientation
         """
+        # Waypoints interpolation
         waypoints_ext = np.vstack((waypoints, waypoints[:50, :]))
         L = np.arange(0, waypoints_ext.shape[0])
 
         self.lut_x = interpolant('LUT_x', 'bspline', [L], waypoints_ext[:, 0], dict(degree=[3]))
         self.lut_y = interpolant('LUT_y', 'bspline', [L], waypoints_ext[:, 1], dict(degree=[3]))
-        self.lut_theta = interpolant('LUT_t', 'bspline', [L], waypoints_ext[:, 2], dict(degree=[1]))
+        self.lut_theta = interpolant('LUT_t', 'bspline', [L], waypoints_ext[:, 2], dict(degree=[3]))
 
-        # Soft cost constraint
+        # Soft constraint cost for track boundaries
         cost_fit = np.zeros((10000))
         numbers = np.linspace(-16,16,10000)
-        
         for i in range(10000):
-            cost_fit[i] = self.cost_custom(numbers[i])
-        
-        self.lut_d = interpolant('LUT_d', 'bspline', [numbers], cost_fit, dict(degree=[1]))
-
+            cost_fit[i] = self.cost_track_const(numbers[i])
+        self.lut_d = interpolant('LUT_d', 'bspline', [numbers], cost_fit, dict(degree=[3]))
 
         return self.lut_x, self.lut_y, self.lut_theta, self.lut_d
 
-
-    def cost_custom(self, d):
-
-        if -4 <= d <= 4:
+    def cost_track_const(self, d: float):
+        b = 2
+        if -b <= d <= b:
             cost = 0.0
         else:
-            cost = (abs(d) - 4) ** 2
-      
+            cost = (abs(d) - b) ** 2
         return cost
 
     def track_constraints(self, state_mpc: MX, theta: MX) -> (MX): 
@@ -344,7 +337,6 @@ class CarEnv():
         cost = self.lut_d(u_b + l_b)
 
         bounds = MX(vcat([cost, u_b + l_b]))
-        # bounds = MX(vcat([u_b, -l_b, u_b + l_b]))
         
         return bounds
 
@@ -426,7 +418,7 @@ class CarEnv():
         t = opti.variable(1, self.P + 1)    # Path length parameter
         v = opti.variable(1, self.P + 1)    # Path progression rate
         u = opti.variable(2, self.P)        # Controls [throttle/brake, steering]
-        d_s = opti.variable(1,self.P)
+        d_s = opti.variable(1, self.P)
         c = opti.variable(1, self.P)
 
         # Costs to optimize over
@@ -460,7 +452,6 @@ class CarEnv():
                 dt = Ts + 0
 
             opti.subject_to(s[:, i+1] == pred(s[:, i], u[:, i], dt))
-            # opti.subject_to(self.track_constraints(s[:, i + 1], t[i + 1])[:2] < 0)
             opti.subject_to(c[i] == self.track_constraints(s[:, i + 1], t[i + 1])[1])
             opti.subject_to(d_s[i] == self.track_constraints(s[:, i + 1], t[i + 1])[0])
             opti.subject_to(e[i] == self.calculate_error(s[:, i], t[i], max_L))
@@ -477,6 +468,7 @@ class CarEnv():
         opti.set_initial(u, np.vstack((prev_controls[:, 1:].T, prev_controls[:, -1])).T)
         opti.set_initial(t, np.hstack((prev_t[1:], prev_t[-1] + prev_v[-1] * dt)))
         opti.set_initial(v, np.hstack((prev_v[1:], prev_v[-1])))
+        opti.set_initial(d_s, 0)
         opti.set_initial(e, 0)
 
         # Set ipopt options
@@ -547,8 +539,8 @@ def main():
 
         # Set controller tuning params
         env.set_mpc_params(P = 25, vmax = 35)
-        env.set_opti_weights(w_u0 = env.w_matrix(1, 0)[:-1, :-1], w_u1 = env.w_matrix(1, 0)[:-1, :-1], w_ql = env.w_matrix(3, 0.02), 
-                            gamma = env.w_matrix(8, -0.2), w_c = 5, w_ds = env.w_matrix(init_value=1, step_size=0.01)[:-1, :-1])
+        env.set_opti_weights(w_u0 = env.w_matrix(1, 0)[:-1, :-1], w_u1 = env.w_matrix(2, 0)[:-1, :-1], w_ql = env.w_matrix(3, -0.02), 
+                            gamma = env.w_matrix(8, -0.2), w_c = 5, w_ds = env.w_matrix(init_value=1, step_size=1)[:-1, :-1])
         Ts = 0.1
 
         prev_states = np.vstack([env.car_state] * (env.P + 1)).T
@@ -584,8 +576,8 @@ def main():
 
             except RuntimeError as err:
                 print('Error occured with following error message: \n {} \n'.format(err))
-                steer = env.stanley_control(waypoints)
                 print('Fallback on Stanley Control !!!')
+                steer = env.stanley_control(waypoints)
                 if prev_controls[0, 0] > 0:
                     throttle = prev_controls[0, 0]
                     brake = 0
@@ -607,14 +599,16 @@ def main():
 
             if (env.nearest_wp_idx == waypoints.shape[0] - 1) and env.nearest_wp_idx != prev_idx:
                 laps_completed += 1
+                print('Lap {} completed.....'.format(laps_completed))
                 prev_t = prev_t - prev_t[0]
                 if laps_completed == num_of_laps:
+                    print('Braking......')
                     while env.car_state[3] != 0.0:
-                        print('in while loop')
                         env.vehicle.apply_control(carla.VehicleControl(throttle = 0, steer = 0, reverse = False, brake = 0.2))
                         env.car_state = env.get_true_state(orient_flag)
                         env.world.tick()
                     break
+                print('starting lap {}......'.format(laps_completed + 1))
             prev_idx = env.nearest_wp_idx
     finally:
         if save_flag:
