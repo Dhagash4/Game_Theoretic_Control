@@ -63,7 +63,6 @@ class CarEnv():
 
     def spawn_vehicle_2D(self, spawn_pose: np.ndarray):
         """Spawn a Vehicle at given 2D pose
-
         Arg:
             spawn_pose: Vehicle spawn pose [x, y, heading]
         """
@@ -82,10 +81,27 @@ class CarEnv():
         # Append our vehicle to actor list
         self.actor_list.append(self.vehicle)
 
+    
+    def CameraSensor(self):
+
+        #RGB Sensor 
+
+        self.rgb_cam = self.world.get_blueprint_library().find('sensor.camera.rgb')
+        self.rgb_cam.set_attribute('image_size_x','640')
+        self.rgb_cam.set_attribute('image_size_y', '480')
+        self.rgb_cam.set_attribute('fov', '110')
+        
+
+        #Attaching sensor to car
+
+        transform = carla.Transform(carla.Location(x=-4.8,y=0.0, z=7.3), carla.Rotation(pitch = -30))
+        self.cam_sensor = self.world.spawn_actor(self.rgb_cam, transform, attach_to=self.vehicle)
+        self.actor_list.append(self.cam_sensor)
+        self.cam_sensor.listen(lambda image: image.save_to_disk('/home/dhagash/MS-GE-02/MSR-Project/stanley_control/img%09d.png' % image.frame))
+
 
     def read_file(self, path: str, delimiter: str = ' ') -> (np.ndarray):
         """ Read data from a file
-
         Args:
             - path: Path of ASCII file to read
             - delimiter: Delimiter character for the file to be read
@@ -99,7 +115,6 @@ class CarEnv():
 
     def save_log(self, filename: str, data: object):
         """Logging data to a .pickle file
-
         Args:
             - filename: Name of the file to store data
             - data: Data to be logged
@@ -117,7 +132,6 @@ class CarEnv():
 
     def set_tuning_params(self, kp: float = 0.5, ki: float = 0.0, kd: float = 0.1, ke: float = 0.1, kv: float = 10.0):
         """Set the tuning parameters for longitudinal controller and lateral controller
-
         Args:
             - kp: Proportional Gain
             - ki: Integral Gain
@@ -137,7 +151,6 @@ class CarEnv():
 
     def longitudinal_controller(self, v: float, v_des: float, prev_err: float, cumulative_error: float, tuning_params: list, dt: float):
         """Compute control signal (acceleration/deceleration) for linear velocity control
-
         Args:
             - v: Current velocity
             - v_des: Velocity setpoint
@@ -145,7 +158,6 @@ class CarEnv():
             - cumulative_error: Accumulated error over all previous control loop iterations for integral controller
             - tuning_params: [kp, ki, kd] PID controller tuning parameters
             - dt: Controller time step
-
         Returns:
             - acc: Acceleration/deceleration control signal
             - curr_err: Velocity error from the current control loop
@@ -167,14 +179,12 @@ class CarEnv():
 
     def calculate_target_index(self, x_r: float, y_r: float, xs_des: np.ndarray, ys_des: np.ndarray, lookahead_idx: int = 2):
         """Compute the waypoint index which is 'lookahead_idx' indices ahead of the closest waypoint to the current robot position
-
         Args:
             - x_r: Vehicle's x position in world frame
             - y_r: Vehicle's y position in world frame
             - xs_des: Desired trajectory x coordinates in world frame
             - ys_des: Desired trajectory y coordinates in world frame
             - lookahead_idx: Number of indices to lookahead from the nearest waypoint to the vehicle
-
         Returns:
             - idx: waypoint index
             - d: distance between vehicle and waypoint at index 'idx'
@@ -191,12 +201,13 @@ class CarEnv():
 
     def stanley_control(self, waypoints: np.ndarray, laps_required: int):
         """Deploy Stanley Control Paradigm for vehicle control
-
         Args:
             - waypoints: Desired trajectory for vehicle (x, y, yaw)
             - laps_required: Number of laps to be completed
         """
-        #Applying Control to the Car
+        # Wait for car to stabilize after spawning
+        while self.vehicle.get_velocity().z != 0:
+            pass
 
         # Desired velocity [m/s]
         v_des = 14.0
@@ -204,13 +215,14 @@ class CarEnv():
         # Desired trajectory
         x_des = waypoints[:,0]
         y_des = waypoints[:,1]
-        yaw_des = [wrapToPi(np.radians(i)) for i in waypoints[:, 2]] # [radians] 
+        yaw_des = [wrapToPi(i) for i in waypoints[:, 2]] # [radians] 
         
         # Initial velocity error
         err_v = v_des - np.sqrt((self.vehicle.get_velocity().x) ** 2 + (self.vehicle.get_velocity().y) ** 2)
 
         prev_idx = 0
         laps_completed = 0
+
 
         while 1:
             x = self.vehicle.get_transform().location.x
@@ -219,7 +231,6 @@ class CarEnv():
                         
             v_lon = self.vehicle.get_velocity().x * np.cos(np.radians(yaw)) + self.vehicle.get_velocity().y * np.sin(np.radians(yaw))
             v_lat = -self.vehicle.get_velocity().x * np.sin(np.radians(yaw)) + self.vehicle.get_velocity().y * np.cos(np.radians(yaw))
-            print(v_lon, v_lat)
 
             self.snapshot = self.world.wait_for_tick()
             curr_t = self.snapshot.timestamp.elapsed_seconds # [seconds]
@@ -252,10 +263,18 @@ class CarEnv():
             
             prev_idx = idx
 
+            if prev_idx == 1000:
+                print('changing speed')
+                v_des = 6
+
+            if prev_idx == 2000:
+                print('changing speed')
+                v_des = 12
+
             # Visualize waypoints
             self.world.debug.draw_string(carla.Location(waypoints[idx, 0], waypoints[idx, 1], 2), '.', draw_shadow=False,
-                                   color=carla.Color(r=255, g=0, b=0), life_time=5,
-                                   persistent_lines=True)
+                                color=carla.Color(r=255, g=0, b=0), life_time=5,
+                                persistent_lines=True)
 
             # Heading error [radians]
             psi_h = wrapToPi(yaw_des[idx] - np.radians(yaw))
@@ -306,8 +325,9 @@ def main():
 
         # Spawn a vehicle at spawn_pose
         spawn_pose = waypoints[0]
+        spawn_pose[2] = np.degrees(spawn_pose[2])
         env.spawn_vehicle_2D(spawn_pose)
-
+        # env.CameraSensor()
         # Set controller tuning params
         # Default params
         num_of_laps = 1

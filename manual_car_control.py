@@ -80,13 +80,13 @@ class CarEnv():
 
         #Attaching sensor to car
 
-        transform = carla.Transform(carla.Location(x=2.5, z=0.7))
+        transform = carla.Transform(carla.Location(x=-4.8,y=0.0, z=7.3), carla.Rotation(pitch = -30))
         self.cam_sensor = self.world.spawn_actor(self.rgb_cam, transform, attach_to=self.vehicle)
         self.actor_list.append(self.cam_sensor)
 
         # Data from the camera
 
-        # self.cam_sensor.listen(lambda image: image.save_to_disk('/home/dhagash/MS-GE-02/MSR-Project/output/%06d.png' % image.frame))
+        self.cam_sensor.listen(lambda image: image.save_to_disk('/home/dhagash/MS-GE-02/MSR-Project/camera_pos_fix/%06d.png' % image.frame))
 
         #IMU Sensor
 

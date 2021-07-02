@@ -5,7 +5,7 @@ import os, sys
 import numpy as np
 from casadi import *
 from numpy.lib.utils import info
-from scipy.sparse import csc_matrix
+# from scipy.sparse import csc_matrix
 from matplotlib import pyplot as plt
 
 sys.path.append('..')

@@ -5,7 +5,7 @@ import os, sys
 import numpy as np
 from casadi import *
 from numpy.lib.utils import info
-from scipy.sparse import csc_matrix
+# from scipy.sparse import csc_matrix
 
 sys.path.append('..')
 
@@ -29,24 +29,36 @@ def predict_new(old_states, control, params, dt):
     x, y, theta, vx, vy = old_states
     v = np.sqrt(vx ** 2 + vy ** 2)
     acc, delta = control
-    x_new = x + (v * np.cos(np.arctan2(np.tan(delta), 2) + theta) * dt)
-    y_new = y + (v * np.sin(np.arctan2(np.tan(delta), 2) + theta) * dt)
-    theta_new = wrapToPi(theta + (v * np.tan(delta) * dt / np.sqrt((L ** 2) + ((0.5 * L * np.tan(delta)) ** 2))))
-    vx_new = vx + (p * acc - Cd * v * vx - Cfr * vx) * dt
-    vy_new = vy - (Ccs * wrapToPi(np.arctan2(vy, vx) - delta) + (Cd * v + Cfr) * vy) * dt
+    x_new = x + (v * np.cos(np.arctan2(np.tan(delta), 2) + theta) * dt) #+ np.random.normal(0, 0.5)
+    y_new = y + (v * np.sin(np.arctan2(np.tan(delta), 2) + theta) * dt) #+ np.random.normal(0, 0.5)
+    theta_new = wrapToPi(theta + (v * np.tan(delta) * dt / np.sqrt((L ** 2) + ((0.5 * L * np.tan(delta)) ** 2)))) #+ np.random.normal(0, 0.1)
+    vx_new = vx + (p * acc - Cd * v * vx - Cfr * vx) * dt #+ np.random.normal(0, 1)
+    vy_new = vy - (Ccs * wrapToPi(np.arctan2(vy, vx) - delta) + (Cd * v + Cfr) * vy) * dt #+ np.random.normal(0, 1)
     new_states = np.array([x_new, y_new, theta_new, vx_new, vy_new])
 
-    return new_states
+    return new_states 
+
+def err_to_tangent(nearest_wp, curr_state):
+    
+    m = tan(nearest_wp[2])
+    x0, y0 = nearest_wp[:2]
+    x_r, y_r = curr_state[0], curr_state[1]
+    crosstrack_err = fabs(m * x_r - y_r + y0 - m * x0) / sqrt(m**2 + 1)
+    head_err = atan2(sin(nearest_wp[2] - curr_state[2]), cos(nearest_wp[2] - curr_state[2]))
+
+    return MX(vcat([crosstrack_err, head_err]))
 
 
 def calculate_error(curr_state, ref_state, coeff, yaw_des):
+    
     theta = ref_state[2] 
     x = cos(-theta) * (curr_state[0] - ref_state[0]) - sin(-theta) * (curr_state[1] - ref_state[1])
     y = sin(-theta) * (curr_state[0] - ref_state[0]) - cos(-theta) * (curr_state[1] - ref_state[1])
    
     yaw = curr_state[2]
 
-    y_pred = coeff[0] * (x ** 2) + coeff[1] * x + coeff[2]
+    y_pred = coeff[0] * (x) + coeff[1] 
+    
     crosstrack = y_pred - y
 
     head_err = yaw_des - yaw
@@ -67,6 +79,7 @@ def calculate_nearest_index(curr_state, waypoints: np.ndarray, curr_idx):
 
 
 if __name__ == '__main__':
+    
     waypoints = np.loadtxt('../../Data/2D_waypoints.txt')
     
     states = []
@@ -79,7 +92,7 @@ if __name__ == '__main__':
     states.append(state(0, spawn_pose[0], spawn_pose[1], spawn_pose[2], 0, 0, 0))
     controls.append(control(0, 0.0, 0.0, 0.0, 0.0, 0))
 
-    curr_idx = 10
+    curr_idx = 400
     curr_state = np.array([spawn_pose[0], spawn_pose[1], spawn_pose[2], 0.01, 0.01])
 
     # Desired velocity [m/s]
@@ -92,7 +105,7 @@ if __name__ == '__main__':
     u = MX.sym('u', 2)
     acc, delta = u[0], u[1]
 
-    prediction = vertcat(x + sqrt(vx**2 + vy**2) * cos(atan2(tan(delta), 2) + yaw) * 0.03,
+    prediction = vertcat(   x + sqrt(vx**2 + vy**2) * cos(atan2(tan(delta), 2) + yaw) * 0.03,
                             y + sqrt(vx**2 + vy**2) * sin(atan2(tan(delta), 2) + yaw) * 0.03,
                             atan2(sin(yaw + (sqrt(vx**2 + vy**2) * tan(delta) * 0.03 / sqrt((19.8025) + (4.95 * tan(delta)**2)))), cos(yaw + (sqrt(vx**2 + vy**2) * tan(delta) * 0.03 / sqrt((19.8025) + (4.95 * tan(delta)**2))))),
                             vx + ((4.22 * acc) - (-0.0013 * sqrt(vx**2 + vy**2) * vx - 0.362 * vx)) * 0.03,
@@ -105,28 +118,39 @@ if __name__ == '__main__':
 
     # Prediction Horizon
     i = 0
-    while(i < 300):
-        i += 1
+#     curr_idx = 0
+    
+    while i<100:
+        i+=1
         # Set using true states
         curr_idx = calculate_nearest_index(curr_state, waypoints, curr_idx)
-        yaw_des = waypoints[curr_idx, 2]
-        yaw = -curr_state[2]
-        R = np.array([[np.cos(yaw), -np.sin(yaw)], [np.sin(yaw), np.cos(yaw)]])
-        wp_car_frame = R @ (waypoints[max(0, curr_idx-10):curr_idx+10, :2].T - curr_state[:2].reshape(-1, 1))
-        coeff = np.polyfit(wp_car_frame[0, :], wp_car_frame[1, :], 2)
-        coeff_list = coeff.tolist()
+        
+#         if(curr_idx <= last_idx):
+#             curr_idx = last_idx
+#         else:
+#             last_idx = curr_idx
+#         yaw_des = waypoints[curr_idx, 2]
+#         yaw = -curr_state[2]
+#         R = np.array([[np.cos(yaw), -np.sin(yaw)], [np.sin(yaw), np.cos(yaw)]])
+#         wp_car_frame = R @ (waypoints[max(0, curr_idx-5):curr_idx+5, :2].T - curr_state[:2].reshape(-1, 1))
+#         coeff = np.polyfit(wp_car_frame[0, :], wp_car_frame[1, :], 1)
+#         coeff_list = coeff.tolist()
 
         N = 5
         s = opti.variable(5, N + 1)
         e = opti.variable(2, N + 1)
         u = opti.variable(2, N)
+        u_jump = opti.variable(2,N+1)
         p = opti.parameter(5, 1)
 
-        opti.minimize(sumsqr(e) + sumsqr(vx_des - s[3, :]) + sumsqr(u) + sumsqr(u[:, :N-1] - u[:, 1:N]))
+        opti.minimize(10 * sumsqr(e) + sumsqr(vx_des - s[3, :]) + sumsqr(u) + sumsqr(u[:, :N-1] - u[:, 1:N]))
+#         opti.minimize(5 * sumsqr(e[:,0]) +  sumsqr(e[:,1]) + sumsqr(vx_des - s[3, :]) + sumsqr(u))
 
         for k in range(N):
-            opti.subject_to(e[:, k] == calculate_error(s[:, k], curr_state, coeff_list, yaw_des))
+#             opti.subject_to(e[:, k] == calculate_error(s[:, k], curr_state, coeff_list, yaw_des))
+            opti.subject_to(e[:, k] == err_to_tangent(waypoints[curr_idx],s[:,k]))
             opti.subject_to(s[:, k+1] == pred(s[:, k], u[:, k]))
+#             opti.subject_to(u_jump[:,k+1] == u[:,:k-1] - u[:,:k])
 
         opti.subject_to(s[:, 0] == p)
 
@@ -138,7 +162,7 @@ if __name__ == '__main__':
         # Good Initialization
         opti.set_initial(s, np.array([curr_state, curr_state, curr_state, curr_state, curr_state, curr_state]).T)
 
-        p_opts = {"print_time": True, 'ipopt.print_level': 0}
+        p_opts = {"print_time": False, 'ipopt.print_level': 0}
         opti.solver('ipopt', p_opts)
 
         sol = opti.solve()
@@ -155,9 +179,10 @@ if __name__ == '__main__':
 
         steer = cont[1, 0] / 1.22
 
-        print('states', sol.value(s))
-        print('errors', sol.value(e))
-        print('controls', sol.value(u))
+# #         print('states', sol.value(s))
+#         print('errors', sol.value(e))
+        print('Index',curr_idx)
+#         print('controls', sol.value(u))
 
         # self.snapshot = self.world.wait_for_tick()
         # curr_t = self.snapshot.timestamp.elapsed_seconds # [seconds]
