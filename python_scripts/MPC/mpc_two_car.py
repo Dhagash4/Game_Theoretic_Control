@@ -161,7 +161,7 @@ class CarEnv():
         for actor in self.actor_list:
             actor.destroy()
 
-    def get_true_state(self, vehicle, orient_flag) -> (np.ndarray):
+    def get_true_state(self, vehicle, orient_flag: bool) -> (np.ndarray):
         """Get vehicles true state from the simulation
         
         Returns
@@ -326,7 +326,7 @@ class CarEnv():
         
         return bounds
 
-    def dist_to_ellipse(self, ref_states, state_mpc, a, b):
+    def dist_to_ellipse(self, ref_states: np.ndarray, state_mpc: MX, a: float, b: float) -> (MX):
         x_c = ref_states[0]
         y_c = ref_states[1]
         theta = -ref_states[2]
@@ -338,7 +338,7 @@ class CarEnv():
 
         return d
 
-    def stanley_control(self, waypoints, car_state, max_steer_angle):
+    def stanley_control(self, waypoints: np.ndarray, car_state: np.ndarray, max_steer_angle: float) -> (float):
         x_des, y_des, yaw_des = waypoints[self.nearest_idx_c1 + 3]
         x, y, yaw, v_lon, v_lat = car_state
 
@@ -360,7 +360,7 @@ class CarEnv():
 
         return steer
 
-    def mpc(self, orient_flag: bool, prev_vals: dict, curr_state, nearest_idx, obs_states, system_params: np.ndarray, max_L: float, L: np.ndarray, Ts: float):
+    def mpc(self, orient_flag: bool, prev_vals: dict, curr_state: np.ndarray, nearest_idx: int, obs_vals: dict, system_params: np.ndarray, max_L: float, L: np.ndarray, Ts: float) -> (dict):
         """Model Predictive Controller Function
 
         Arguments
@@ -458,7 +458,7 @@ class CarEnv():
             opti.subject_to(lag_error[i] == self.calculate_error(mpc_states[:, i], t[i]))
             opti.subject_to(t[i + 1] == t[i] + v[i] * dt)
 
-            d = self.dist_to_ellipse(obs_states[:, i + 1], mpc_states[:, i + 1], 4.5, 3)
+            d = self.dist_to_ellipse(obs_vals['states'][:, i + 1], mpc_states[:, i + 1], 4.5, 3)
             opti.subject_to(d > 1)
 
         opti.subject_to(lag_error[-1] == self.calculate_error(mpc_states[:, -1], t[-1]))
@@ -492,15 +492,19 @@ class CarEnv():
         prev_vals['t'] = opti_t
         prev_vals['v'] = opti_v
 
-        # Plot predicted states
-        # plt.plot(opti_states[0, :], opti_states[1, :])
-        # plt.pause(0.01)
-        # plt.cla()
+        plot_flag = False
+        if plot_flag:
+            # Plot predicted states
+            plt.plot(opti_states[0, :], opti_states[1, :])
+            plt.pause(0.01)
+            plt.cla()
 
-        # print('Predicted states: \n {} \n'.format(opti_states[2, :]))
-        # print('Optimized Controls: \n {} \n'.format(opti_controls))
-        # print('Predicted parameter: \n {} \n'.format(opti_t))
-        # print('Path progression: \n {} \n'.format(opti_v))
+        print_flag = False
+        if print_flag:
+            print('Predicted states: \n {} \n'.format(opti_states[2, :]))
+            print('Optimized Controls: \n {} \n'.format(opti_controls))
+            print('Predicted parametewer: \n {} \n'.format(opti_t))
+            print('Path progression: \n {} \n'.format(opti_v))
 
         return prev_vals
 
@@ -613,7 +617,9 @@ def main():
                 orient_flag_2 = False
 
             env.car_1_state = env.get_true_state(vehicle_1, orient_flag_1)
+            env.nearest_idx_c1 = env.calculate_nearest_index(env.car_1_state, waypoints)
             env.car_2_state = env.get_true_state(vehicle_2, orient_flag_2)
+            env.nearest_idx_c2 = env.calculate_nearest_index(env.car_2_state, waypoints)
 
             env.world.debug.draw_box(carla.BoundingBox(carla.Location(env.car_1_state[0], env.car_1_state[1], 0), carla.Vector3D(4.5, 3, 1)), carla.Rotation(0, np.degrees(env.car_1_state[2]), 0), thickness=0.1, color=carla.Color(0, 255, 0), life_time=1)
             env.world.debug.draw_box(carla.BoundingBox(carla.Location(env.car_2_state[0], env.car_2_state[1], 0), carla.Vector3D(4.5, 3, 1)), carla.Rotation(0, np.degrees(env.car_2_state[2]), 0), thickness=0.1, color=carla.Color(0, 255, 0), life_time=1)
@@ -621,12 +627,10 @@ def main():
             print(env.car_1_state[3], env.car_2_state[3])
 
             # env.cam_sensor.listen(lambda image: image.save_to_disk('/home/dhagash/MS-GE-02/MSR-Project/camera_pos_fix/%06d.png' % image.frame))
-            env.nearest_idx_c1 = env.calculate_nearest_index(env.car_1_state, waypoints)
-            env.nearest_idx_c2 = env.calculate_nearest_index(env.car_2_state, waypoints)
 
             if not end_flag[0]:
                 try:
-                    prev_vals_1 = env.mpc(orient_flag_1, prev_vals_1, env.car_1_state, env.nearest_idx_c1, prev_states_2, sys_params, max_L, L, Ts)
+                    prev_vals_1 = env.mpc(orient_flag_1, prev_vals_1, env.car_1_state, env.nearest_idx_c1, prev_vals_2, sys_params, max_L, L, Ts)
                     
                     steer_1 = prev_vals_1['controls'][1, 0] / 1.22
 
@@ -659,7 +663,7 @@ def main():
             
             if not end_flag[1]:
                 try:
-                    prev_vals_2 = env.mpc(orient_flag_2, prev_vals_2, env.car_2_state, env.nearest_idx_c2, prev_states_1, sys_params, max_L, L, Ts)
+                    prev_vals_2 = env.mpc(orient_flag_2, prev_vals_2, env.car_2_state, env.nearest_idx_c2, prev_vals_1, sys_params, max_L, L, Ts)
                     
                     steer_2 = prev_vals_2['controls'][1, 0] / 1.22
 
