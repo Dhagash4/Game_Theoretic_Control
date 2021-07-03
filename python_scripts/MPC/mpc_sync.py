@@ -289,7 +289,7 @@ class CarEnv():
 
         # Soft cost constraint
         cost_fit = np.zeros((10000))
-        numbers = np.linspace(-16,16,10000)
+        numbers = np.linspace(-20,20,10000)
         
         for i in range(10000):
             cost_fit[i] = self.cost_custom(numbers[i])
@@ -302,10 +302,10 @@ class CarEnv():
 
     def cost_custom(self, d):
 
-        if -4 <= d <= 4:
+        if -7.5 <= d <= 7.5:
             cost = 0.0
         else:
-            cost = (abs(d) - 4) ** 2
+            cost = (abs(d) - 7.5) ** 2
       
         return cost
 
@@ -318,7 +318,7 @@ class CarEnv():
         y_ref = self.lut_y(theta)
         yaw = self.lut_theta(theta)
         
-        track_width = 8.0           # [m]
+        track_width = 15.0           # [m]
         d = (track_width * 0.75)/2
         
         a = -tan(yaw)

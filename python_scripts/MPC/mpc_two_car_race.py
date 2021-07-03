@@ -284,9 +284,9 @@ class CarEnv():
         self.lut_theta = interpolant('LUT_t', 'bspline', [L], waypoints_ext[:, 2], dict(degree=[3]))
 
         # Soft constraint cost for track boundaries
-        t = 10                               # Threshold
+        t = 7                               # Threshold
         cost_fit = np.zeros((10000))
-        numbers = np.linspace(-20,20,10000)
+        numbers = np.linspace(-7**2,7**2,10000)
         for i in range(10000):
             if -t <= numbers[i] <= t:
                 cost_fit[i] = 0.0
@@ -296,7 +296,8 @@ class CarEnv():
 
         return self.lut_x, self.lut_y, self.lut_theta, self.lut_d
 
-    def track_constraints(self, state_mpc: MX, theta: MX) -> (MX): 
+    def track_constraints(self, state_mpc: MX, theta: MX) -> (MX):
+
         x = state_mpc[0]
         y = state_mpc[1]
 
@@ -305,7 +306,7 @@ class CarEnv():
         y_ref = self.lut_y(theta)
         yaw = self.lut_theta(theta)
         
-        track_width = 15.0           # [m]
+        track_width = 14.0           # [m]
         d = (track_width * 0.8)/2
         
         a = -tan(yaw)
@@ -352,7 +353,7 @@ class CarEnv():
         yaw_diff = wrapToPi(yaw_des - np.arctan2(y - y_des, x - x_des))
 
         # Crosstrack error in yaw [radians]
-        psi_c = np.arctan2(2.5 * np.sign(yaw_diff) * d, 5.0 + v_lon)
+        psi_c = np.arctan2(0.5 * np.sign(yaw_diff) * d, 5.0 + v_lon)
 
         # Steering angle control
         steer = np.degrees(wrapToPi(psi_h + psi_c))                 # uncontrained in degrees
@@ -421,7 +422,7 @@ class CarEnv():
         # Costs to optimize over
         p_acc   =  u[0, :]  @ w_u0 @ u[0, :].T                             # Throttle/Brake cost
         p_steer =  u[1, :] @  w_u1 @ u[1, :].T                             # Steering cost
-        p_control_roc = w_c * sumsqr(u[:, :P-1] - u[:, 1:P])     # Rate of Change of Controls
+        p_control_roc = w_c * sumsqr(u[:, :P-1] - u[:, 1:P])             # Rate of Change of Controls
 
         p_v_roc = w_c * sumsqr(v[:P] - v[1:P + 1])               # Rate of Change of progression rate 
         r_v_max = ((v * Ts) @ gamma @ (v * Ts).T)                          # Progression Reward
@@ -512,8 +513,8 @@ def main():
         spawn_idx = 180
         env.nearest_idx_c1 = spawn_idx
         env.nearest_idx_c2 = spawn_idx
-        vehicle_1, env.car_1_state, max_steer_angle_1 = env.spawn_vehicle_2D(spawn_idx+5, waypoints,0)
-        vehicle_2, env.car_2_state, max_steer_angle_2 = env.spawn_vehicle_2D(spawn_idx, waypoints, -3)
+        vehicle_1, env.car_1_state, max_steer_angle_1 = env.spawn_vehicle_2D(spawn_idx, waypoints,-4)
+        vehicle_2, env.car_2_state, max_steer_angle_2 = env.spawn_vehicle_2D(spawn_idx, waypoints, 4)
 
         env.states_1.append(state(0, env.car_1_state[0], env.car_1_state[1], env.car_1_state[2], env.car_1_state[3], env.car_1_state[4], 0))
         env.states_2.append(state(0, env.car_2_state[0], env.car_2_state[1], env.car_2_state[2], env.car_2_state[3], env.car_2_state[4], 0))
