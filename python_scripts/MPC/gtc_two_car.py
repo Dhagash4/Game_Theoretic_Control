@@ -501,7 +501,7 @@ class CarEnv():
 def main():
     try:
         # Data logging flag
-        save_flag = False
+        save_flag = True
 
         # Initialize car environment
         env = CarEnv()
@@ -514,7 +514,7 @@ def main():
         spawn_idx = 200
         env.nearest_idx_c1 = spawn_idx
         env.nearest_idx_c2 = spawn_idx
-        vehicle_1, env.car_1_state, max_steer_angle_1 = env.spawn_vehicle_2D(spawn_idx, waypoints, -4)
+        vehicle_1, env.car_1_state, max_steer_angle_1 = env.spawn_vehicle_2D(spawn_idx + 5, waypoints, -4)
         vehicle_2, env.car_2_state, max_steer_angle_2 = env.spawn_vehicle_2D(spawn_idx, waypoints, 4)
 
         env.states_1.append(state(0, env.car_1_state[0], env.car_1_state[1], env.car_1_state[2], env.car_1_state[3], env.car_1_state[4], 0))
@@ -590,6 +590,7 @@ def main():
         fallbacks_1 = 0
         fallbacks_2 = 0
         # Initialize control loop
+        iters = 3
         while(1):
             total_iterations += 1
             if ((total_iterations % 50) == 0):
@@ -610,44 +611,46 @@ def main():
             env.nearest_idx_c1 = env.calculate_nearest_index(env.car_1_state, waypoints)
             env.car_2_state = env.get_true_state(vehicle_2, orient_flag_2)
             env.nearest_idx_c2 = env.calculate_nearest_index(env.car_2_state, waypoints)
+            print(env.car_1_state[3], env.car_2_state[3])
 
             # env.world.debug.draw_box(carla.BoundingBox(carla.Location(env.car_1_state[0], env.car_1_state[1], 0), carla.Vector3D(4.5, 3, 1)), carla.Rotation(0, np.degrees(env.car_1_state[2]), 0), thickness=0.1, color=carla.Color(0, 255, 0), life_time=1)
             # env.world.debug.draw_box(carla.BoundingBox(carla.Location(env.car_2_state[0], env.car_2_state[1], 0), carla.Vector3D(4.5, 3, 1)), carla.Rotation(0, np.degrees(env.car_2_state[2]), 0), thickness=0.1, color=carla.Color(0, 255, 0), life_time=1)
 
-            print(env.car_1_state[3], env.car_2_state[3])
+            
 
             # env.cam_sensor.listen(lambda image: image.save_to_disk('/home/dhagash/MS-GE-02/MSR-Project/camera_pos_fix/%06d.png' % image.frame))
-            count = 0
-            if not end_flag[0]:
-                try:
-
-                    if count < 300: 
+            
+            for i in range(iters):
+               
+                if not end_flag[0]:
+                    try:
                         
-                        env.set_mpc_params(P = 30, vmax = 25)
-                        count += 1
+                        
+                        # env.set_mpc_params(P = 30, vmax = 25)
 
-                    else:
+                        prev_vals_1 = env.mpc(orient_flag_1, prev_vals_1, env.car_1_state, env.nearest_idx_c1, prev_vals_2, sys_params, max_L, L, Ts)
+                        
+                        steer_1 = prev_vals_1['controls'][1, 0] / 1.22
 
-                        env.set_mpc_params(P = 30, vmax = 10)
-                        count += 1
-                     
-                    prev_vals_1 = env.mpc(orient_flag_1, prev_vals_1, env.car_1_state, env.nearest_idx_c1, prev_vals_2, sys_params, max_L, L, Ts)
-                    
-                    steer_1 = prev_vals_1['controls'][1, 0] / 1.22
+                        
 
-                    if prev_vals_1['controls'][0, 0] > 0:
-                        throttle_1 = prev_vals_1['controls'][0, 0]
-                        brake_1 = 0
-                    else:
-                        brake_1 = prev_vals_1['controls'][0, 0]
-                        throttle_1 = 0
+                    except RuntimeError as err:
+                        
+                        if i < iters-1:
+                            pass
+                        
+                        else:
 
-                except RuntimeError as err:
-                    fallbacks_1 += 1
-                    
-                    print('Car 1: Error occured with following error message: \n {} \n'.format(err))
-                    print('Car 1: Fallback on Stanley Control !!!')
-                    steer_1 = env.stanley_control(waypoints, env.car_1_state, max_steer_angle_1)
+                            fallbacks_1 += 1
+                            
+                            print('Car 1: Error occured with following error message: \n {} \n'.format(err))
+                            print('Car 1: Fallback on Stanley Control !!!')
+                            steer_1 = env.stanley_control(waypoints, env.car_1_state, max_steer_angle_1)
+                            prev_vals_1['controls'][0, :] = prev_vals_1['controls'][0, 0]
+                            prev_vals_1['controls'][1, :] = steer_1
+                            prev_vals_1['states'] = np.vstack([env.car_1_state] * (env.P + 1)).T
+                            prev_vals_1['t'] = prev_vals_1['t'] + env.car_1_state[3] * Ts
+                            pass
 
                     if prev_controls_1[0, 0] > 0:
                         throttle_1 = prev_vals_1['controls'][0, 0]
@@ -656,47 +659,50 @@ def main():
                         brake_1 = prev_vals_1['controls'][0, 0]
                         throttle_1 = 0              
 
-                    prev_vals_1['controls'][0, :] = prev_vals_1['controls'][0, 0]
-                    prev_vals_1['controls'][1, :] = steer_1
-                    prev_vals_1['states'] = np.vstack([env.car_1_state] * (env.P + 1)).T
-                    prev_vals_1['t'] = prev_vals_1['t'] + env.car_1_state[3] * Ts
-                    pass
-            
-            if not end_flag[1]:
-                try:
-                    env.set_mpc_params(P = 30, vmax = 55)
-            
-                    prev_vals_2 = env.mpc(orient_flag_2, prev_vals_2, env.car_2_state, env.nearest_idx_c2, prev_vals_1, sys_params, max_L, L, Ts)
                     
-                    steer_2 = prev_vals_2['controls'][1, 0] / 1.22
 
-                    if prev_vals_2['controls'][0, 0] > 0:
-                        throttle_2 = prev_vals_2['controls'][0, 0]
-                        brake_2 = 0
-                    else:
-                        brake_2 = prev_vals_2['controls'][0, 0]
-                        throttle_2 = 0
-
-                except RuntimeError as err:
-                    fallbacks_2 += 1
-                
-                    print('Car 2: Error occured with following error message: \n {} \n'.format(err))
-                    print('Car 2: Fallback on Stanley Control !!!')
-                    steer_2 = env.stanley_control(waypoints, env.car_2_state, max_steer_angle_2)
-
-                    if prev_vals_2['controls'][0, 0] > 0:
-                        throttle_2 = prev_vals_2['controls'][0, 0]
-                        brake_2 = 0
-                    else:
-                        brake_2 = prev_vals_2['controls'][0, 0]
-                        throttle_2 = 0
-
-                    prev_vals_2['controls'][0, :] = prev_vals_2['controls'][0, 0]
-                    prev_vals_2['controls'][1, :] = steer_2
-                    prev_vals_2['states'] = np.vstack([env.car_2_state] * (env.P + 1)).T
-                    prev_vals_2['t'] = prev_vals_2['t'] + env.car_2_state[3] * Ts
-                    pass
+                            
             
+                
+                if not end_flag[1]:
+                    try:
+
+                        # env.set_mpc_params(P = 30, vmax = 35)
+                        prev_vals_2 = env.mpc(orient_flag_2, prev_vals_2, env.car_2_state, env.nearest_idx_c2, prev_vals_1, sys_params, max_L, L, Ts)
+                        steer_2 = prev_vals_2['controls'][1, 0] / 1.22
+
+                    except RuntimeError as err:
+                        if i < iters-1:
+                            pass
+                        
+                        else:
+                            fallbacks_2 += 1
+                            print('Car 2: Error occured with following error message: \n {} \n'.format(err))
+                            print('Car 2: Fallback on Stanley Control !!!')
+                            steer_2 = env.stanley_control(waypoints, env.car_2_state, max_steer_angle_2)
+                            prev_vals_2['controls'][0, :] = prev_vals_2['controls'][0, 0]
+                            prev_vals_2['controls'][1, :] = steer_2
+                            prev_vals_2['states'] = np.vstack([env.car_2_state] * (env.P + 1)).T
+                            prev_vals_2['t'] = prev_vals_2['t'] + env.car_2_state[3] * Ts
+                            pass
+
+                    if prev_vals_2['controls'][0, 0] > 0:
+                        throttle_2 = prev_vals_2['controls'][0, 0]
+                        brake_2 = 0
+                    else:
+                        brake_2 = prev_vals_2['controls'][0, 0]
+                        throttle_2 = 0
+                
+                
+              
+            #     plt.plot(prev_vals_1['states'][0,:],prev_vals_1['states'][1,:],'r')
+            #     plt.plot(prev_vals_2['states'][0,:],prev_vals_2['states'][1,:],'b')
+            #     plt.pause(1)
+            
+            # plt.cla()
+                # plt.show()
+
+                
             if (env.nearest_idx_c1 == waypoints.shape[0] - 1) and env.nearest_idx_c1 != prev_idx[0]:
                 laps_completed[0] += 1
                 prev_vals_1['t'] = prev_vals_1['t'] - prev_vals_1['t'][0]
@@ -719,26 +725,31 @@ def main():
 
             prev_idx[1] = env.nearest_idx_c2
 
+            # print("Applied Control xD")
+
             vehicle_1.apply_control(carla.VehicleControl(throttle = throttle_1, steer = steer_1, reverse = False, brake = brake_1))
             vehicle_2.apply_control(carla.VehicleControl(throttle = throttle_2, steer = steer_2, reverse = False, brake = brake_2))
             env.world.tick()
 
-            # env.states_1.append(state(0, env.car_1_state[0], env.car_1_state[1], env.car_1_state[2], env.car_1_state[3], env.car_1_state[4], 0))
-            # env.controls_1.append(control(0, throttle_1, brake_1, env.control_1[0], steer_1, 0))
+            env.states_1.append(state(0, env.car_1_state[0], env.car_1_state[1], env.car_1_state[2], env.car_1_state[3], env.car_1_state[4], 0))
+            env.controls_1.append(control(0, throttle_1, brake_1, env.control_1[0], steer_1, 0))
 
-            # env.states_2.append(state(0, env.car_2_state[0], env.car_2_state[1], env.car_2_state[2], env.car_2_state[3], env.car_2_state[4], 0))
-            # env.controls_2.append(control(0, throttle_2, brake_2, env.control_2[0], steer_2, 0))
+            env.states_2.append(state(0, env.car_2_state[0], env.car_2_state[1], env.car_2_state[2], env.car_2_state[3], env.car_2_state[4], 0))
+            env.controls_2.append(control(0, throttle_2, brake_2, env.control_2[0], steer_2, 0))
 
             if env.car_1_state[3] == 0.0 and env.car_2_state[3] == 0 and laps_completed[0] == num_of_laps[0] and laps_completed[1] == num_of_laps[1]:
                 break
 
     finally:
+
         if save_flag:
+
         # Save all Dataclass object lists to a file
-            env.save_log('../../Data/states_1_mpc.pickle', env.states_1)
-            env.save_log('../../Data/controls_1_mpc.pickle', env.controls_1)
-            env.save_log('../../Data/states_2_mpc.pickle', env.states_2)
-            env.save_log('../../Data/controls_2_mpc.pickle', env.controls_2)
+            
+            env.save_log('../../Data/states_1_gtc_test.pickle', env.states_1)
+            env.save_log('../../Data/controls_1_gtc_test.pickle', env.controls_1)
+            env.save_log('../../Data/states_2_gtc_test.pickle', env.states_2)
+            env.save_log('../../Data/controls_2_gtc_test.pickle', env.controls_2)
 
         # Destroy all actors in the simulation
         env.destroy()
