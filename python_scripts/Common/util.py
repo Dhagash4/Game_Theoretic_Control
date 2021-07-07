@@ -11,6 +11,8 @@
 # ==============================================================================
 import numpy as np
 from math import pi
+import pickle
+from typing import Tuple, NoReturn
 
 def wrapToPi(theta: float) -> (float):
     """
@@ -51,3 +53,29 @@ def euclidean_distance(pt_A: np.ndarray, pt_B: np.ndarray) -> (float):
     """
     dist = np.linalg.norm(pt_A - pt_B)
     return dist
+
+def read_file(path: str, delimiter: str = ' ') -> (np.ndarray):
+    """ Read data from a file
+
+    Arguments
+    ---------
+    - path: Path of ASCII file to read
+    - delimiter: Delimiter character for the file to be read
+    
+    Returns
+    -------
+    - data: Data from file as a numpy array
+    """
+    data = np.loadtxt(path, delimiter=delimiter)
+    return data
+
+def save_log(filename: str, data: object) -> NoReturn:
+    """Logging data to a '.pickle' file
+
+    Arguments
+    ---------
+    - filename: Name of the file to store data
+    - data: Data to be logged
+    """
+    with open(filename, "wb") as f:
+        pickle.dump(data, f)
