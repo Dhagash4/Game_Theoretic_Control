@@ -433,7 +433,7 @@ class CarEnv():
 
         return steer
 
-    def mpc(self, ego_sols: dict, ego_state: np.ndarray, nearest_idx: int, opp_sols: dict, system_params: np.ndarray, max_L: float, 
+    def mpc(self, ego_sols: dict, ego_state: np.ndarray, nearest_idx: int, opp_states: np.ndarray, system_params: np.ndarray, max_L: float, 
         L: np.ndarray, Ts: float, weights: dict, orient_flag: bool, plot_flag: bool, print_flag: bool) -> (dict):
         """Model Predictive Controller Function
 
@@ -442,7 +442,7 @@ class CarEnv():
         - ego_sols: a dictionary containing all the solutions for the ego vehicle from the previous iteration of MPC
         - ego_state: current true state of the concerned vehicle
         - nearest_idx: nearest waypoint index to the current vehicle position
-        - opp_sols: a dictionary containing all the solutions for the opponent from the previous iteration of MPC
+        - opp_states: opponent states for collision avoidance
         - system_params: Vehicle dynamics parameters obtained from System ID
         - max_L: maximum path length of the track
         - L: cumulative sum of distance between 2 consecutive waypoints to be used as a parameter for the splines
@@ -546,7 +546,7 @@ class CarEnv():
             opti.subject_to(lag_error[i] == self.calculate_error(mpc_states[:, i], t[i]))
             opti.subject_to(t[i + 1] == t[i] + v[i] * dt)
 
-            d = self.dist_to_ellipse(opp_sols['states'][:, i + 1], mpc_states[:, i + 1], 4.5, 3)
+            d = self.dist_to_ellipse(opp_states[:, i + 1], mpc_states[:, i + 1], 4.5, 3)
             opti.subject_to(collision[i] == self.lut_collision_cost(d))
 
         opti.subject_to(lag_error[-1] == self.calculate_error(mpc_states[:, -1], t[-1]))
@@ -739,7 +739,7 @@ def main():
                     # Set controller tuning params
                     env.set_mpc_params(P = 25, vmax = args.vmax1)
                     obst_states = env.const_vel_model(env.car_2_state, Ts, env.P + 1)
-                    prev_sols_1 = env.mpc(prev_sols_1, env.car_1_state, env.nearest_idx_c1, prev_sols_2,
+                    prev_sols_1 = env.mpc(prev_sols_1, env.car_1_state, env.nearest_idx_c1, obst_states,
                      sys_params, max_L, L, Ts, weights1, orient_flag_1, args.plot, args.print)
                     
                     steer_1 = prev_sols_1['controls'][1, 0] / 1.22
@@ -775,7 +775,7 @@ def main():
                     # Set controller tuning params
                     env.set_mpc_params(P = 25, vmax = args.vmax2)
                     obst_states = env.const_vel_model(env.car_1_state, Ts, env.P + 1)
-                    prev_sols_2 = env.mpc(prev_sols_2, env.car_2_state, env.nearest_idx_c2, prev_sols_1,
+                    prev_sols_2 = env.mpc(prev_sols_2, env.car_2_state, env.nearest_idx_c2, obst_states,
                      sys_params, max_L, L, Ts, weights2, orient_flag_2, args.plot, args.print)
                     
                     steer_2 = prev_sols_2['controls'][1, 0] / 1.22
