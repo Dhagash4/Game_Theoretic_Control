@@ -617,13 +617,13 @@ def main():
         args = argparser.parse_args()
 
         if args.save:
-            states_filename_1 = '../../Data/GTC_vs_GTC/' + args.filename + '_car1_states.pickle'
-            controls_filename_1 = '../../Data/GTC_vs_GTC/' + args.filename + '_car1_controls.pickle'
+            states_filename_1 = '../../Data/GTC_vs_MPC/' + args.filename + '_car1_states.pickle'
+            controls_filename_1 = '../../Data/GTC_vs_MPC/' + args.filename + '_car1_controls.pickle'
             states_file_1 = open(states_filename_1, 'wb')
             controls_file_1 = open(controls_filename_1, 'wb')
 
-            states_filename_2 = '../../Data/GTC_vs_GTC/' + args.filename + '_car2_states.pickle'
-            controls_filename_2 = '../../Data/GTC_vs_GTC/' + args.filename + '_car2_controls.pickle'
+            states_filename_2 = '../../Data/GTC_vs_MPC/' + args.filename + '_car2_states.pickle'
+            controls_filename_2 = '../../Data/GTC_vs_MPC/' + args.filename + '_car2_controls.pickle'
             states_file_2 = open(states_filename_2, 'wb')
             controls_file_2 = open(controls_filename_2, 'wb')
 
@@ -846,7 +846,7 @@ def main():
 
             states_file_2.close()
             controls_file_2.close()
-            
+
         # Destroy all actors in the simulation
         env.destroy()
 
