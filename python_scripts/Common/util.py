@@ -13,7 +13,9 @@ import numpy as np
 from math import pi
 import pickle
 from typing import Tuple, NoReturn
+from numba import jit
 
+@jit(nopython=True)
 def wrapToPi(theta: float) -> (float):
     """
     Wrap around angles to the range [-pi, pi]
@@ -79,3 +81,5 @@ def save_log(filename: str, data: object) -> NoReturn:
     """
     with open(filename, "wb") as f:
         pickle.dump(data, f)
+    
+    return None
