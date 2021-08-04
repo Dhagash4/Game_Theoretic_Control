@@ -11,11 +11,8 @@
 # ==============================================================================
 import numpy as np
 from math import pi
-import pickle
 from typing import Tuple, NoReturn
-from numba import jit
 
-@jit(nopython=True)
 def wrapToPi(theta: float) -> (float):
     """
     Wrap around angles to the range [-pi, pi]
@@ -70,16 +67,3 @@ def read_file(path: str, delimiter: str = ' ') -> (np.ndarray):
     """
     data = np.loadtxt(path, delimiter=delimiter)
     return data
-
-def save_log(filename: str, data: object) -> NoReturn:
-    """Logging data to a '.pickle' file
-
-    Arguments
-    ---------
-    - filename: Name of the file to store data
-    - data: Data to be logged
-    """
-    with open(filename, "wb") as f:
-        pickle.dump(data, f)
-    
-    return None
