@@ -636,9 +636,9 @@ def main():
         vehicle_2, env.car_2_state, max_steer_angle_2 = env.spawn_vehicle_2D(spawn_idx, waypoints, 4)
 
         if args.save:
-            cpickle.dump(np.r_[env.car_1_state], states_file_1)
+            cpickle.dump(np.r_[env.car_1_state, env.nearest_idx_c1], states_file_1)
             cpickle.dump(np.r_[0.0, 0.0, 0.0], controls_file_1)
-            cpickle.dump(np.r_[env.car_2_state], states_file_2)
+            cpickle.dump(np.r_[env.car_2_state, env.nearest_idx_c2], states_file_2)
             cpickle.dump(np.r_[0.0, 0.0, 0.0], controls_file_2)
 
         # Spawn time car stabilization
@@ -737,7 +737,7 @@ def main():
                     try:
                         # Set controller tuning params
                         env.set_mpc_params(P = 25, vmax = args.vmax1)
-                        prev_sols_1 = env.mpc(prev_sols_1, env.car_1_state, env.nearest_idx_c1, prev_sols_2,
+                        prev_sols_1 = env.mpc(prev_sols_1, env.car_1_state, env.nearest_idx_c1, prev_sols_2['states'],
                          sys_params, max_L, L, Ts, weights1, orient_flag_1, args.plot, args.print)
                     
                         steer_1 = prev_sols_1['controls'][1, 0] / 1.22
@@ -830,10 +830,10 @@ def main():
             env.world.tick()
 
             if args.save:
-                cpickle.dump(env.car_1_state, states_file_1)
+                cpickle.dump(np.r_[env.car_1_state, env.nearest_idx_c1], states_file_1)
                 cpickle.dump(np.r_[throttle_1, brake_1, steer_1], controls_file_1)
 
-                cpickle.dump(env.car_2_state, states_file_2)
+                cpickle.dump(np.r_[env.car_2_state, env.nearest_idx_c2], states_file_2)
                 cpickle.dump(np.r_[throttle_2, brake_2, steer_2], controls_file_2)
 
             if env.car_1_state[3] == 0.0 and env.car_2_state[3] == 0 and laps_completed[0] == args.number_of_laps and laps_completed[1] == args.number_of_laps:
