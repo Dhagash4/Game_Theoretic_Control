@@ -1,8 +1,15 @@
 #!/usr/bin/env python
 
+# ==============================================================================
+
 # @Authors: Saurabh Gupta ; Dhagash Desai
 # @email: s7sagupt@uni-bonn.de ; s7dhdesa@uni-bonn.de
-# MSR Project Sem 2
+
+# MSR Project Sem 2: Game Theoretic Control for Multi-Car Racing
+
+# Plot cost functions for collision with track boundaries and opponents
+
+# ==============================================================================
 
 # ==============================================================================
 # -- imports -------------------------------------------------------------------
@@ -26,8 +33,7 @@ lut_d = interpolant('LUT_d', 'bspline', [numbers], cost_fit, dict(degree=[3]))
 
 f, (ax1, ax2) = plt.subplots(1, 2)
 f.suptitle('Soft constraint for track boundaries', fontsize=20)
-# ax1.set_aspect('equal', 'box')
-# ax2.set_aspect('equal', 'box')
+
 mng = plt.get_current_fig_manager()
 mng.window.showMaximized()
 
@@ -65,7 +71,7 @@ ax2.axvline(7.5, color='black')
 ax2.axvline(6, color='g', linestyle='--')
 ax2.legend(['Track boundaries', 'Safety Margin', 'Track centerline'], fontsize=15)
 col = ax2.contourf(X, Y, Z, 100, cmap='rainbow')
-cbar = plt.colorbar(col)
+cbar = plt.colorbar(col, location='bottom')
 cbar.set_label('Cost for boundary constraint violation', fontsize=15)
 ax2.set_xlabel('Distance offset from track centerline [m]', fontsize=18)
 ax2.set_ylabel('Along Track distance [m]', fontsize=18)
@@ -78,7 +84,7 @@ except FileExistsError:
     os.mkdir('temp/')
 
 x = np.linspace(-8.5, 8.5, 1000)
-y = np.linspace(-10, 10, 1000)
+y = np.linspace(-15, 15, 1000)
 
 X, Y = np.meshgrid(x, y)
 
@@ -94,28 +100,28 @@ for i in range(Z.shape[0]):
         else:
             Z[i, j] = (1 - Z[i, j]) ** 3
 
-car_y = np.linspace(-5, 5, 100)
+car_y = np.linspace(-5, 7.5, 100)
 
 f, ax = plt.subplots()
-# plt.tight_layout()
+plt.tight_layout()
 ax.set_aspect('equal', 'box')
 mng = plt.get_current_fig_manager()
 mng.window.showMaximized()
 for i in range(len(car_y)):
-    ax.axvline(-7.5, color='r', label='Track Boundaries')
-    ax.axvline(7.5, color='r')
-    col = plt.contourf(X, Y, Z, 100, cmap='rainbow')
-    cbar = plt.colorbar(col, location='bottom', shrink=0.35)
+    ax.axhline(-7.5, color='r', label='Track Boundaries')
+    ax.axhline(7.5, color='r')
+    col = plt.contourf(Y, X, Z, 100, cmap='rainbow')
+    cbar = plt.colorbar(col, location='bottom', shrink=0.5)
     cbar.set_label('Cost for obstacle collision', fontsize=15)
-    ax.scatter(1, -3, s=100, marker='x', color='black', label='Obstacles')
-    ax.scatter(-1, 3, s=100, marker='x', color='black')
-    ax.scatter(0, car_y[i], s=100, marker='x', color='green', label='Vehicle')
+    ax.scatter(-3, 1, s=100, marker='x', color='black', label='Static Obstacles')
+    ax.scatter(3, -1, s=100, marker='x', color='black')
+    ax.scatter(car_y[i], 0, s=100, marker='o', color='green', label='Moving Vehicle')
     cost = min(((0 - 1) / 3) ** 2 + ((car_y[i] + 3) / 4.5) ** 2, ((0 + 1) / 3) ** 2 + ((car_y[i] - 3) / 4.5) ** 2)
     cost = (1 - cost) ** 3
-    plt.text(0.5, 0.95, 'Collision Cost: {}'.format(round(cost, 4)), transform=ax.transAxes, horizontalalignment='center', verticalalignment='center', fontsize=15)
+    plt.text(0.5, 0.9, 'Collision Penalty: {}'.format(round(cost, 4)), transform=ax.transAxes, horizontalalignment='center', verticalalignment='center', fontsize=20, color='red')
     plt.legend(fontsize=15)
-    ax.set_xlabel('Distance offset from track centerline [m]', fontsize=18)
-    ax.set_ylabel('Along Track distance [m]', fontsize=18)   
+    ax.set_ylabel('Distance offset from track centerline [m]', fontsize=18)
+    ax.set_xlabel('Along Track distance [m]', fontsize=18)   
     plt.suptitle('Collision avoidance cost function', fontsize=18)
     plt.pause(0.1)
     plt.savefig('temp/{}.png'.format(i+1))

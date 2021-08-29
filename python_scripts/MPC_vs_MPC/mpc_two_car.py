@@ -1,11 +1,18 @@
 #!/usr/bin/env python
 
+# ==============================================================================
+
 # @Authors: Saurabh Gupta ; Dhagash Desai
 # @email: s7sagupt@uni-bonn.de ; s7dhdesa@uni-bonn.de
-# MSR Project: Game Theoretic Control for Multi Robot Racing
+
+# MSR Project Sem 2: Game Theoretic Control for Multi-Car Racing
 
 # Model Predictive Contour Controller for Two Cars with dynamic collsion avoidance
-# (Single iteration of IBR)
+# (Constant Velocity model for opponent trajectory)
+
+# NOTE: This script requires Carla simulator running in the background with the concerned map loaded 
+ 
+# ==============================================================================
 
 # ==============================================================================
 # -- imports -------------------------------------------------------------------
@@ -19,7 +26,6 @@ import casadi
 from casadi import *
 
 import numpy as np
-from numpy.lib.utils import info
 import _pickle as cpickle
 from matplotlib import pyplot as plt
 
@@ -33,7 +39,8 @@ try:
             sys.version_info.minor,
             'win-amd64' if os.name == 'nt' else 'linux-x86_64'))[0])
 except IndexError:
-    pass
+    print('Carla simulator not running!! Please start the simulator......')
+    sys.exit()
 
 import carla
 # ==============================================================================
@@ -197,6 +204,35 @@ class CarEnv():
 
         return new_state
 
+    def const_vel_model(self, start_state: np.ndarray, dt: float, P: int) -> (np.ndarray):
+        """Constant velocity model based predictions of car states over the prediction horizon
+
+        Arguments
+        ---------
+        - start_state: initial state (known) of the vehicle [x, y, yaw, vx, vy]
+        - dt: sampling time of the controller
+        - P: Prediction Horizon
+
+        Returns
+        -------
+        - predictions: predicted states over the given horizon
+        """
+        predictions = np.zeros((5, P + 1))
+        predictions[:, 0] = start_state
+
+        for i in range(1, N + 1):
+            x, y, theta, vx, vy = predictions[:, i - 1]
+            v = np.sqrt(vx ** 2 + vy ** 2)
+        
+            x_new = x + (v * np.cos(theta) * dt)
+            y_new = y + (v * np.sin(theta) * dt)
+            
+            new_state = np.array([x_new, y_new, theta, vx, vy])
+
+            predictions[:, i] = new_state
+
+        return predictions
+
     def calculate_nearest_index(self, current_state: np.ndarray, waypoints: np.ndarray) -> (int):
         """Search nearest waypoint index to the current pose from the waypoints list
 
@@ -222,7 +258,7 @@ class CarEnv():
         return idx
 
     def calculate_error(self, state_mpc: casadi.MX, theta: casadi.MX) -> (casadi.MX):
-        """Compute Contouring and Lag errors at given prediction step for the Model Predictive Contour Controller
+        """Compute Lag error at given prediction step for the Model Predictive Contour Controller
 
         Arguments
         ---------
@@ -416,7 +452,7 @@ class CarEnv():
 
         return steer
 
-    def mpc(self, ego_sols: dict, ego_state: np.ndarray, nearest_idx: int, opp_sols: dict, system_params: np.ndarray, max_L: float,
+    def mpc(self, ego_sols: dict, ego_state: np.ndarray, nearest_idx: int, opp_states: np.ndarray, system_params: np.ndarray, max_L: float, 
         L: np.ndarray, Ts: float, weights: dict, orient_flag: bool, plot_flag: bool, print_flag: bool) -> (dict):
         """Model Predictive Controller Function
 
@@ -425,7 +461,7 @@ class CarEnv():
         - ego_sols: a dictionary containing all the solutions for the ego vehicle from the previous iteration of MPC
         - ego_state: current true state of the concerned vehicle
         - nearest_idx: nearest waypoint index to the current vehicle position
-        - opp_sols: a dictionary containing all the solutions for the opponent from the previous iteration of MPC
+        - opp_states: opponent states for collision avoidance
         - system_params: Vehicle dynamics parameters obtained from System ID
         - max_L: maximum path length of the track
         - L: cumulative sum of distance between 2 consecutive waypoints to be used as a parameter for the splines
@@ -508,7 +544,7 @@ class CarEnv():
         opti.minimize(p_acc + p_steer + p_lag + p_boundary + p_control_roc + p_v_roc + p_wobble + p_collision - r_v_max)
         
         # Constraints
-        opti.subject_to(mpc_states[:, 0] == ego_state)          # Start prediction with true vehicle state
+        opti.subject_to(mpc_states[:, 0] == ego_state)         # Start prediction with true vehicle state
         opti.subject_to(t[0] == L[nearest_idx])                     
 
         opti.subject_to(opti.bounded(-1.0, u[0, :], 1.0))       # Bounded steering
@@ -529,7 +565,7 @@ class CarEnv():
             opti.subject_to(lag_error[i] == self.calculate_error(mpc_states[:, i], t[i]))
             opti.subject_to(t[i + 1] == t[i] + v[i] * dt)
 
-            d = self.dist_to_ellipse(opp_sols['states'][:, i + 1], mpc_states[:, i + 1], 4.5, 3)
+            d = self.dist_to_ellipse(opp_states[:, i + 1], mpc_states[:, i + 1], 4.5, 3)
             opti.subject_to(collision[i] == self.lut_collision_cost(d))
 
         opti.subject_to(lag_error[-1] == self.calculate_error(mpc_states[:, -1], t[-1]))
@@ -606,23 +642,23 @@ def main():
         args = argparser.parse_args()
 
         if args.save:
-            states_filename_1 = '../../Data/MPC_vs_MPC/' + args.filename + '_car1_states.pickle'
-            controls_filename_1 = '../../Data/MPC_vs_MPC/' + args.filename + '_car1_controls.pickle'
+            states_filename_1 = '../../Data/MPC_vs_MPC_const_vel/' + args.filename + '_car1_states.pickle'
+            controls_filename_1 = '../../Data/MPC_vs_MPC_const_vel/' + args.filename + '_car1_controls.pickle'
             states_file_1 = open(states_filename_1, 'wb')
             controls_file_1 = open(controls_filename_1, 'wb')
 
-            states_filename_2 = '../../Data/MPC_vs_MPC/' + args.filename + '_car2_states.pickle'
-            controls_filename_2 = '../../Data/MPC_vs_MPC/' + args.filename + '_car2_controls.pickle'
+            states_filename_2 = '../../Data/MPC_vs_MPC_const_vel/' + args.filename + '_car2_states.pickle'
+            controls_filename_2 = '../../Data/MPC_vs_MPC_const_vel/' + args.filename + '_car2_controls.pickle'
             states_file_2 = open(states_filename_2, 'wb')
             controls_file_2 = open(controls_filename_2, 'wb')
-        
+
         # Spawn two vehicles at spawn_pose corresponding to spawn_idx index in waypoints list
         spawn_idx = args.spawn_idx
         env.nearest_idx_c1 = spawn_idx
         env.nearest_idx_c2 = spawn_idx
         vehicle_1, env.car_1_state, max_steer_angle_1 = env.spawn_vehicle_2D(spawn_idx, waypoints, -4)
         vehicle_2, env.car_2_state, max_steer_angle_2 = env.spawn_vehicle_2D(spawn_idx, waypoints, 4)
-
+        
         if args.save:
             cpickle.dump(np.r_[env.car_1_state, env.nearest_idx_c1], states_file_1)
             cpickle.dump(np.r_[0.0, 0.0, 0.0], controls_file_1)
@@ -638,9 +674,8 @@ def main():
         l = np.cumsum(np.sqrt(np.sum(np.square(waypoints_ext[:-1, :2] - waypoints_ext[1:, :2]), axis = 1)))
         L = np.r_[0, l]
         max_L = L[waypoints.shape[0] + 1]
-
-        # Fit 3 degree b-splines for the waypoint poses and boundary/vehicle collision penalty
-        env.lut_x, env.lut_y, env.lut_theta, env.lut_boundary_cost, env.lut_collision_cost = env.fit_curve(waypoints_ext, L)
+        # Fit 3 degree b-splines for the waypoint poses and boundary collision penalty
+        env.lut_x, env.lut_y, env.lut_theta, env.lut_d, env.lut_collide = env.fit_curve(waypoints_ext, L)
 
         # Set MPC optimization variables' penalty weights
         env.set_mpc_params(P = 25)
@@ -662,7 +697,7 @@ def main():
         weights2['w_b']         = env.w_matrix(init_value=1, step_size=1)[:-1, :-1]
         weights2['w_roc']       = 5
         weights2['w_c']         = env.w_matrix(init_value=2, step_size=0)[:-1, :-1]
-
+        
         # Controller and Prediction time step          
         Ts = 0.1
 
@@ -716,13 +751,12 @@ def main():
             env.car_2_state = env.get_true_state(vehicle_2, orient_flag_2)
             env.nearest_idx_c2 = env.calculate_nearest_index(env.car_2_state, waypoints)
 
-            # env.cam_sensor.listen(lambda image: image.save_to_disk('/home/dhagash/MS-GE-02/MSR-Project/camera_pos_fix/%06d.png' % image.frame))
-
             if not end_flag[0]:
                 try:
                     # Set controller tuning params
                     env.set_mpc_params(P = 25, vmax = args.vmax1)
-                    prev_sols_1 = env.mpc(prev_sols_1, env.car_1_state, env.nearest_idx_c1, prev_sols_2,
+                    obst_states = env.const_vel_model(env.car_2_state, Ts, env.P + 1)
+                    prev_sols_1 = env.mpc(prev_sols_1, env.car_1_state, env.nearest_idx_c1, obst_states,
                      sys_params, max_L, L, Ts, weights1, orient_flag_1, args.plot, args.print)
                     
                     steer_1 = prev_sols_1['controls'][1, 0] / 1.22
@@ -757,7 +791,8 @@ def main():
                 try:
                     # Set controller tuning params
                     env.set_mpc_params(P = 25, vmax = args.vmax2)
-                    prev_sols_2 = env.mpc(prev_sols_2, env.car_2_state, env.nearest_idx_c2, prev_sols_1,
+                    obst_states = env.const_vel_model(env.car_1_state, Ts, env.P + 1)
+                    prev_sols_2 = env.mpc(prev_sols_2, env.car_2_state, env.nearest_idx_c2, obst_states,
                      sys_params, max_L, L, Ts, weights2, orient_flag_2, args.plot, args.print)
                     
                     steer_2 = prev_sols_2['controls'][1, 0] / 1.22

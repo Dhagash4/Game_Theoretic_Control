@@ -1,27 +1,24 @@
 #!/usr/bin/env python
 
+# ==============================================================================
+
 # @Authors: Saurabh Gupta ; Dhagash Desai
 # @email: s7sagupt@uni-bonn.de ; s7dhdesa@uni-bonn.de
-# MSR Project Sem 2
 
-import glob
-import getopt
-import pickle
-import os, sys
+# MSR Project Sem 2: Game Theoretic Control for Multi-Car Racing
+
+# Track boundary tangential constraint check
+
+# ==============================================================================
+
+# ==============================================================================
+# -- imports -------------------------------------------------------------------
+# ==============================================================================
+import sys
 import numpy as np
-from casadi import *
-from typing import Tuple, NoReturn
-from numpy.lib.utils import info
 from matplotlib import pyplot as plt
 
-sys.path.append('..')
-
-from Common.util import *
-from Common.custom_dataclass import *
-
 waypoints = np.loadtxt('../../Data/2D_waypoints.txt')
-
-# plt.plot(waypoints[:, 0], waypoints[:, 1], 'r')
 
 for waypoint in waypoints:
     x_ref = waypoint[0]
@@ -44,8 +41,6 @@ for waypoint in waypoints:
     x_l = x_ref - d * np.sin(yaw)
     y_l = y_ref + d * np.cos(yaw)
 
-    # u_b = a * x  + b * y + c1
-    # l_b = a * x  + b * y + c2 
     plt.plot(waypoints[:, 0], waypoints[:, 1], 'r')
     plt.axline((x_u, y_u), slope=np.tan(yaw), color='g')
     plt.axline((x_l, y_l), slope=np.tan(yaw), color='b')

@@ -1,10 +1,17 @@
 #!/usr/bin/env python
 
+# ==============================================================================
+
 # @Authors: Saurabh Gupta ; Dhagash Desai
 # @email: s7sagupt@uni-bonn.de ; s7dhdesa@uni-bonn.de
-# MSR Project: Game Theoretic Control for Multi Robot Racing
+
+# MSR Project Sem 2: Game Theoretic Control for Multi-Car Racing
 
 # Model Predictive Contour Controller for Single Car
+
+# NOTE: This script requires Carla simulator running in the background with the concerned map loaded 
+
+# ==============================================================================
 
 # ==============================================================================
 # -- imports -------------------------------------------------------------------
@@ -18,7 +25,6 @@ import casadi
 from casadi import *
 
 import numpy as np
-from numpy.lib.utils import info
 import _pickle as cpickle
 from matplotlib import pyplot as plt
 
@@ -32,7 +38,8 @@ try:
             sys.version_info.minor,
             'win-amd64' if os.name == 'nt' else 'linux-x86_64'))[0])
 except IndexError:
-    pass
+    print('Carla simulator not running!! Please start the simulator......')
+    sys.exit()
 
 import carla
 # ==============================================================================

@@ -1,11 +1,21 @@
-import glob
-import getopt
+#!/usr/bin/env python
+
+# ==============================================================================
+
+# @Authors: Saurabh Gupta ; Dhagash Desai
+# @email: s7sagupt@uni-bonn.de ; s7dhdesa@uni-bonn.de
+
+# MSR Project Sem 2: Game Theoretic Control for Multi-Car Racing
+
+# ==============================================================================
+
+# ==============================================================================
+# -- imports -------------------------------------------------------------------
+# ==============================================================================
 import pickle
-import os, sys
+import sys
 import numpy as np
 from casadi import *
-from numpy.lib.utils import info
-from scipy.sparse import csc_matrix
 from matplotlib import pyplot as plt
 
 sys.path.append('..')
@@ -35,15 +45,6 @@ plt.title('Velocity Plot')
 plt.xlabel('Control Steps')
 plt.ylabel('Longitudinal velocity [m/s]')
 plt.show()
-# Read control commands
-# filename = 'controls_mpc.pickle'
-# with open(filename, 'rb') as f:
-#     data = pickle.load(f)
-
-# t_controls = np.array([d.time for d in data])
-# throttle = np.array([d.throttle for d in data])
-# brake = np.array([d.brake for d in data])
-# steer = np.array([d.steer for d in data])
 
 fig = plt.figure("Ground Truth v/s Reference Trajectory Comparison")
 fig.suptitle("Ground Truth v/s Reference Trajectory Comparison", size=25)
@@ -65,5 +66,3 @@ plt.plot(x_gt, y_gt)
 plt.plot(x_des, y_des)
 plt.legend(['ground truth', 'center-line'], fontsize=15)
 plt.show()
-# plt.plot(x_gt[0], y_gt[0], 'xr')
-# plt.plot(x_gt[-1], y_gt[-1], 'xg')

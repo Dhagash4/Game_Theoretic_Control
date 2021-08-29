@@ -1,18 +1,22 @@
 #!/usr/bin/env python
 
+# ==============================================================================
+
 # @Authors: Saurabh Gupta ; Dhagash Desai
 # @email: s7sagupt@uni-bonn.de ; s7dhdesa@uni-bonn.de
-# MSR Project Sem 2
+
+# MSR Project Sem 2: Game Theoretic Control for Multi-Car Racing
+
+# System Identification using Non-Linear Least Squares Approach
+
+# ==============================================================================
 
 # ==============================================================================
 # -- imports -------------------------------------------------------------------
 # ==============================================================================
 import sys
 import pickle
-from typing import Optional
 import numpy as np
-from casadi import *
-from numpy.lib.utils import info
 from matplotlib import pyplot as plt
 
 sys.path.append('..')
@@ -21,11 +25,22 @@ from Common.util import *
 from Common.custom_dataclass import *
 
 
-def Jacobian(states, control, params):
+def Jacobian(states: np.ndarray, control: np.ndarray, sys_params: np.ndarray) -> (np.ndarray):
+    """Compute the Jacobian matrix for the chosen state transition equations (dynamic model of the vehicles)
 
-    x, y, theta, vx, vy = states
+    Arguments
+    ---------
+    - states: states of the vehicle at which Jacobian has to be evaluated [x, y, yaw, vx, vy]
+    - control: control commands applied to the vehicle at that instant
+    - sys_params: estimate of the unknown model parameters
+
+    Returns
+    -------
+    - J: Jacobian matrix evaluated at given state and controls with the rough estimate of model parameters
+    """
+    _, _, _, vx, vy = states
     acc, delta = control
-    L, p, Cd, Cfr, Ccs = params    
+    L, _, _, _, _ = sys_params    
     
     dtheta_dL = (-np.sqrt(vx ** 2 + vy ** 2) * np.tan(delta) * np.cos(np.arctan2(np.tan(delta), 2))) / (L ** 2)
 
@@ -45,9 +60,23 @@ def Jacobian(states, control, params):
 
     return J
 
-def predict_new(old_states, control, params, dt):
-    L, p, Cd, Cfr, Ccs = params
+def predict_new(old_states, control, sys_params, dt):
+    """Generates a prediction of the new vehicle states given the old state and the controls applied
+    
+    Arguments
+    ---------
+    - old_states: old state of the vehicle [x, y, yaw, vx, vy]
+    - control: control commands given to the vehicle [throttle/brake, steer]
+    - sys_params: vehicle dynamics parameters obtained from System ID
+    - dt: sampling time of the controller
+
+    Returns
+    -------
+    - new_state: new predicted state of the vehicle [x, y, yaw, vx, vy]
+    """
+    L, p, Cd, Cfr, Ccs = sys_params
     new_states = np.zeros_like(old_states)
+
     m, n = old_states.shape
     for i in range(m):
         x, y, theta, vx, vy = old_states[i]
@@ -62,9 +91,8 @@ def predict_new(old_states, control, params, dt):
     return new_states
 
 if __name__=='__main__':
-
     # Read ground truth states
-    filename = '../../Data/states_e(0.100000)_v(5.000000)_p(0.500000)_i(0.010000)_d(0.150000)_n(1.000000).pickle'
+    filename = '../../Data/states_sys_id.pickle'
     with open(filename, 'rb') as f:
         data = pickle.load(f)
 
@@ -83,7 +111,7 @@ if __name__=='__main__':
     vy = vy[:-1]
 
     # Read control commands
-    filename = '../../Data/controls_e(0.100000)_v(5.000000)_p(0.500000)_i(0.010000)_d(0.150000)_n(1.000000).pickle'
+    filename = '../../Data/controls_sys_id.pickle'
     with open(filename, 'rb') as f:
         data = pickle.load(f)
 
@@ -141,7 +169,6 @@ if __name__=='__main__':
         pred_states[i, 3] = vx_ + (p * a - Cd * np.sqrt(vx_ ** 2 + vy_ ** 2) * vx_ - Cfr * vx_) * dt
         pred_states[i, 4] = vy_ - (Ccs * wrapToPi(np.arctan2(vy_, vx_) - delta) + (Cd * np.sqrt(vx_ ** 2 + vy_ ** 2) + Cfr) * vy_) * dt       
 
-    # fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2)
     fig, (ax1, ax2) = plt.subplots(1, 2)
 
     ax1.plot(x[start + 1:end], y[start + 1:end])
@@ -157,19 +184,5 @@ if __name__=='__main__':
     ax2.set_xlabel('Time step')
     ax2.set_ylabel('Yaw [radians]')
     ax2.set_title('System ID trajectory yaw')
-
-    # ax3.plot(range(len(vx[start + 1:end])), vx[start + 1:end])
-    # ax3.plot(range(len(pred_states[start + 1:end])), pred_states[start + 1:end, 3])
-    # ax3.legend(['Actual', 'Predicted'])
-    # ax3.set_xlabel('Time [s]')
-    # ax3.set_ylabel('Longitudinal velocity [m/s]')
-    # ax3.set_title('System ID Velocity prediction')
-
-    # ax4.plot(range(len(vy[start + 1:end])), vy[start + 1:end])
-    # ax4.plot(range(len(pred_states[start + 1:end])), pred_states[start + 1:end, 4])
-    # ax4.legend(['Actual', 'Predicted'])
-    # ax4.set_xlabel('Time [s]')
-    # ax4.set_ylabel('Lateral velocity [m/s]')
-    # ax4.set_title('System ID Velocity prediction')
 
     plt.show()

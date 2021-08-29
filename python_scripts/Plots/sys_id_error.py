@@ -1,8 +1,15 @@
 #!/usr/bin/env python
 
+# ==============================================================================
+
 # @Authors: Saurabh Gupta ; Dhagash Desai
 # @email: s7sagupt@uni-bonn.de ; s7dhdesa@uni-bonn.de
-# MSR Project Sem 2
+
+# MSR Project Sem 2: Game Theoretic Control for Multi-Car Racing
+
+# System Identification Error Analysis
+
+# ==============================================================================
 
 # ==============================================================================
 # -- imports -------------------------------------------------------------------
@@ -81,87 +88,24 @@ if __name__=='__main__':
             error[count, j] = np.sqrt((curr_state[0] - states_gt[i + j + 1, 0])**2 + (curr_state[1] - states_gt[i + j + 1, 1])**2)
         count += 1
 
-    mean_error = np.median(error, axis=0)
-    std_dev_error = np.std(error, axis=0)
+    median_error = np.median(error, axis=0)
+    q10, q25, q40, q60, q75, q90 = np.percentile(error, [10, 25, 40, 60, 75, 90], axis=0)
     
-    h = [i for i in range(horizon)]
+    h = np.array([i for i in range(horizon)]) * 0.1
 
     f = plt.figure('Average Position Error over a horizon of {} time steps'.format(horizon))
     plt.tight_layout()
-    plt.title('Average Position Error over a horizon of {} time steps'.format(horizon), fontsize=25)
-    ax = plt.subplot(2, 2, 1)
-    ax.set_xlabel('Time steps', fontsize=15)
-    ax.set_ylabel('Position Error [m]', fontsize=15)
-    for i in range(error.shape[0]):
-        ax.scatter(h[:25], error[i, :25], s=1, c='b')
-    violin_parts = ax.violinplot(error[:, :25], positions=h[:25], showmedians=True)
-    for partname in ('cmins','cmaxes'):
-        vp = violin_parts[partname]
-        vp.set_edgecolor('black')
-        vp.set_linewidth(1)
-    vp = violin_parts['cmedians']
-    vp.set_edgecolor('yellow')
-    vp.set_linewidth(1)
-    for vp in violin_parts['bodies']:
-        vp.set_facecolor('red')
-        vp.set_edgecolor('black')
-        vp.set_linewidth(2)
-        vp.set_alpha(0.5)
-
-    ax = plt.subplot(2, 2, 2)
-    ax.set_xlabel('Time steps', fontsize=15)
-    ax.set_ylabel('Position Error [m]', fontsize=15)
-    for i in range(error.shape[0]):
-        ax.scatter(h[25:50], error[i, 25:50], s=1, c='b')
-    violin_parts = ax.violinplot(error[:, 25:50], positions=h[25:50], showmedians=True)
-    for partname in ('cmins','cmaxes'):
-        vp = violin_parts[partname]
-        vp.set_edgecolor('black')
-        vp.set_linewidth(1)
-    vp = violin_parts['cmedians']
-    vp.set_edgecolor('yellow')
-    vp.set_linewidth(1)
-    for vp in violin_parts['bodies']:
-        vp.set_facecolor('red')
-        vp.set_edgecolor('black')
-        vp.set_linewidth(2)
-        vp.set_alpha(0.5)
-
-    ax = plt.subplot(2, 2, 3)
-    ax.set_xlabel('Time steps', fontsize=15)
-    ax.set_ylabel('Position Error [m]', fontsize=15)
-    for i in range(error.shape[0]):
-        ax.scatter(h[50:75], error[i, 50:75], s=1, c='b')
-    violin_parts = ax.violinplot(error[:, 50:75], positions=h[50:75], showmedians=True)
-    for partname in ('cmins','cmaxes'):
-        vp = violin_parts[partname]
-        vp.set_edgecolor('black')
-        vp.set_linewidth(1)
-    vp = violin_parts['cmedians']
-    vp.set_edgecolor('yellow')
-    vp.set_linewidth(2)
-    for vp in violin_parts['bodies']:
-        vp.set_facecolor('red')
-        vp.set_edgecolor('black')
-        vp.set_linewidth(1)
-        vp.set_alpha(0.5)
-
-    ax = plt.subplot(2, 2, 4)
-    ax.set_xlabel('Time steps', fontsize=15)
-    ax.set_ylabel('Position Error [m]', fontsize=15)
-    for i in range(error.shape[0]):
-        ax.scatter(h[75:], error[i, 75:], s=1, c='b')
-    violin_parts = ax.violinplot(error[:, 75:], positions=h[75:], showmedians=True)
-    for partname in ('cmins','cmaxes'):
-        vp = violin_parts[partname]
-        vp.set_edgecolor('black')
-        vp.set_linewidth(1)
-    vp = violin_parts['cmedians']
-    vp.set_edgecolor('yellow')
-    vp.set_linewidth(2)
-    for vp in violin_parts['bodies']:
-        vp.set_facecolor('red')
-        vp.set_edgecolor('black')
-        vp.set_linewidth(1)
-        vp.set_alpha(0.5)
+    plt.yscale('log')
+    plt.title('System ID error analysis over prediction horizon of 10 seconds', fontsize=20)
+    ax = plt.subplot(1, 1, 1)
+    ax.scatter(h, error[0], s=1, c='blue', alpha=0.1, label='Raw Error Values')
+    for i in range(1, error.shape[0]):
+        ax.scatter(h, error[i], s=1, c='darkblue', alpha=0.2)
+    ax.plot(h, median_error, color='black', label='Median of Error Values')
+    ax.fill_between(h, q10, q90, color='lightgray', alpha=0.3, label='10-90% Interquartile Range')
+    ax.fill_between(h, q25, q75, color='darkgray', alpha=0.3, label='25-75% Interquartile Range')
+    ax.fill_between(h, q40, q60, color='dimgray', alpha=0.3, label='40-60% Interquartile Range')
+    ax.set_xlabel('Prediction horizon in seconds', fontsize=15)
+    ax.set_ylabel('Error between predicted and ground truth position [m] - Log Scale', fontsize=15)
+    plt.legend(fontsize=15)
     plt.show()

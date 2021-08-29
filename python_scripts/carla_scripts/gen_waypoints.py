@@ -1,24 +1,28 @@
 #!/usr/bin/env python
 
+# ==============================================================================
+
 # @Authors: Saurabh Gupta ; Dhagash Desai
 # @email: s7sagupt@uni-bonn.de ; s7dhdesa@uni-bonn.de
-# MSR Project Sem 2
 
-from __future__ import print_function
+# MSR Project Sem 2: Game Theoretic Control for Multi-Car Racing
+
+# This script generates waypoints from the current map loaded into Carla Simulator
+
+# NOTE: This script requires Carla simulator running in the background with the concerned map loaded 
+
+# ==============================================================================
 
 # ==============================================================================
 # -- imports -------------------------------------------------------------------
 # ==============================================================================
-import os
-import sys
-import time
-import glob
+import os, sys
+import time, glob
 import numpy as np
 
 sys.path.append('..')
 
 from Common.util import *
-from Common.custom_dataclass import *
 
 try:
     sys.path.append(glob.glob('../carla/dist/carla-*%d.%d-%s.egg' % (
@@ -26,10 +30,10 @@ try:
         sys.version_info.minor,
         'win-amd64' if os.name == 'nt' else 'linux-x86_64'))[0])
 except IndexError:
-    pass
+    print('Carla simulator not running!! Please start the simulator......')
+    sys.exit()
 
 import carla
-
 
 def main():
     try:
@@ -82,7 +86,7 @@ def main():
         print('2D waypoints saved in \'2D_waypoints.txt\'')
 
     finally:
-        print('done')
+        print('Exiting code....')
 
 if __name__=='__main__':
     main()
