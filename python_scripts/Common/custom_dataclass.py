@@ -1,8 +1,15 @@
 #!/usr/bin/env python
 
+# ==============================================================================
+
 # @Authors: Saurabh Gupta ; Dhagash Desai
 # @email: s7sagupt@uni-bonn.de ; s7dhdesa@uni-bonn.de
-# MSR Project Sem 2
+
+# MSR Project Sem 2: Game Theoretic Control for Multi-Car Racing
+
+# This script defines custom dataclasses to store data
+
+# ==============================================================================
 
 # ==============================================================================
 # -- imports -------------------------------------------------------------------

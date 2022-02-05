@@ -1,19 +1,28 @@
 #!/usr/bin/env python
 
+# ==============================================================================
+
 # @Authors: Saurabh Gupta ; Dhagash Desai
 # @email: s7sagupt@uni-bonn.de ; s7dhdesa@uni-bonn.de
-# MSR Project Sem 2
 
-from __future__ import print_function
+# MSR Project Sem 2: Game Theoretic Control for Multi-Car Racing
+
+# This script generates waypoints from the current map loaded into Carla Simulator
+
+# NOTE: This script requires Carla simulator running in the background with the concerned map loaded 
+
+# ==============================================================================
 
 # ==============================================================================
 # -- imports -------------------------------------------------------------------
 # ==============================================================================
-import os
-import sys
-import time
-import glob
+import os, sys
+import time, glob
 import numpy as np
+
+sys.path.append('..')
+
+from Common.util import *
 
 try:
     sys.path.append(glob.glob('../carla/dist/carla-*%d.%d-%s.egg' % (
@@ -24,7 +33,6 @@ except IndexError:
     pass
 
 import carla
-
 
 def main():
     try:
@@ -56,10 +64,10 @@ def main():
         for waypoint in waypoint_list_20:
             world.debug.draw_string(waypoint.transform.location, 'O', draw_shadow=False,
                                    color=carla.Color(r=0, g=255, b=0), life_time=100,
-                                   persistent_lines=True)
+                                   persistent_lines=False)
             x.append(waypoint.transform.location.x)
             y.append(waypoint.transform.location.y)
-            yaw.append(waypoint.transform.rotation.yaw)
+            yaw.append(wrapToPi(np.radians(waypoint.transform.rotation.yaw)))
 
         for waypoint in waypoint_list_21:
             world.debug.draw_string(waypoint.transform.location, 'O', draw_shadow=False,
@@ -67,15 +75,17 @@ def main():
                                    persistent_lines=True)
             x.append(waypoint.transform.location.x)
             y.append(waypoint.transform.location.y)
-            yaw.append(waypoint.transform.rotation.yaw)
+            yaw.append(wrapToPi(np.radians(waypoint.transform.rotation.yaw)))
         
         # Stack x, y and yaw[degrees] in a single matrix and save it as ASCII file
         waypoints = np.vstack((x, y, yaw))
+        waypoints[2, 1302:1361] = waypoints[2, 1302:1361] - 2 * np.pi
+        waypoints[2, 1441:] = waypoints[2, 1441:] - 2 * np.pi
         np.savetxt('../../Data/2D_waypoints.txt', waypoints.T)
         print('2D waypoints saved in \'2D_waypoints.txt\'')
 
     finally:
-        print('done')
+        print('Exiting code....')
 
 if __name__=='__main__':
     main()
