@@ -39,3 +39,7 @@ cmake/
 *.pickle
 *.log
 *.csv
+*.gif
+*.png
+*.jpeg
+*.jpg
